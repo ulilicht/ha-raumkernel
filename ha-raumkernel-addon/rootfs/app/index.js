@@ -1,0 +1,147 @@
+import { WebSocketServer } from 'ws';
+import RaumkernelHelper from './RaumkernelHelper.js';
+
+import fs from 'fs';
+
+let PORT = 3000;
+try {
+    if (fs.existsSync('/data/options.json')) {
+        const options = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
+        if (options.PORT) PORT = options.PORT;
+    }
+} catch (err) {
+    console.warn('Failed to read /data/options.json, using default port 3000');
+}
+if (process.env.PORT) PORT = process.env.PORT;
+const wss = new WebSocketServer({ port: PORT });
+const rkHelper = new RaumkernelHelper();
+
+console.log(`WebSocket server started on port ${PORT}`);
+
+// Broadcast state to all connected clients
+const broadcast = (data) => {
+    const message = JSON.stringify(data);
+    wss.clients.forEach((client) => {
+        if (client.readyState === client.OPEN) {
+            client.send(message);
+        }
+    });
+};
+
+// Handle state changes from Raumkernel
+rkHelper.raumkernel.on('systemReady', (ready) => {
+    broadcast({ type: 'systemReady', payload: ready });
+});
+
+rkHelper.raumkernel.on('combinedZoneStateChanged', (state) => {
+    // rkHelper handles the update internally via its own listener
+    const zones = rkHelper.getState().availableRooms;
+    broadcast({ type: 'zoneStateChanged', payload: zones });
+});
+
+rkHelper.raumkernel.on('rendererStateChanged', (renderer, state) => {
+     // This might be too noisy, but useful for real-time updates
+     // Ideally we map this back to the Zone it belongs to or send generic update
+     // For minimal implementation, rely on periodic or major events, or implement granular updates.
+     // rkHelper.getAvailableZones() is triggered by combinedZoneStateChanged mostly.
+     // But 'rendererStateChanged' is for volume/transport changes.
+     
+     // Trigger a broadcast of the full zone state for simplicity for now
+     const fullState = rkHelper.getState(); 
+     broadcast({ type: 'fullStateUpdate', payload: fullState });
+});
+
+
+wss.on('connection', (ws) => {
+    console.log('Client connected');
+    
+    // Send initial state
+    ws.send(JSON.stringify({ type: 'fullStateUpdate', payload: rkHelper.getState() }));
+
+    ws.on('message', async (message) => {
+        try {
+            const data = JSON.parse(message);
+            console.log('Received command:', data);
+            
+            const { command, payload } = data;
+            
+            switch (command) {
+                case 'getZones':
+                    ws.send(JSON.stringify({ type: 'zones', payload: rkHelper.getState().availableRooms }));
+                    break;
+                    
+                case 'play':
+                    // payload: { roomUdn, streamUrl } (streamUrl optional if just resuming)
+                    if (payload.streamUrl) {
+                        await rkHelper.load(payload.roomUdn, payload.streamUrl);
+                    } else {
+                        // Use play() directly to ensure wakeup logic is triggered
+                        await rkHelper.play(payload.roomUdn);
+                    }
+                    break;
+                    
+                case 'pause':
+                    await rkHelper.setPause(payload.roomUdn, true);
+                    break;
+                    
+                case 'stop':
+                    await rkHelper.setStop(payload.roomUdn);
+                    break;
+                    
+                case 'next':
+                    await rkHelper.setNext(payload.roomUdn);
+                    break;
+                    
+                case 'prev':
+                    await rkHelper.setPrev(payload.roomUdn);
+                    break;
+                    
+                case 'setVolume':
+                    await rkHelper.setVolume(payload.roomUdn, payload.volume);
+                    break;
+                    
+                case 'setMute':
+                    await rkHelper.setMute(payload.roomUdn, payload.mute);
+                    break;
+                
+                case 'load':
+                    await rkHelper.load(payload.roomUdn, payload.url);
+                    break;
+
+                case 'browse':
+                    const items = await rkHelper.browse(payload.objectId);
+                    ws.send(JSON.stringify({ 
+                        type: 'browseResult', 
+                        payload: { 
+                            objectId: payload.objectId, 
+                            items: items 
+                        } 
+                    }));
+                    break;
+
+                case 'loadContainer':
+                    await rkHelper.loadContainer(payload.roomUdn, payload.containerId);
+                    break;
+
+                case 'loadSingle':
+                    await rkHelper.loadSingle(payload.roomUdn, payload.itemId);
+                    break;
+
+                case 'playSystemSound':
+                    await rkHelper.playSystemSound(payload.roomUdn, payload.soundId);
+                    break;
+
+                case 'enterStandby':
+                    await rkHelper.enterStandby(payload.roomUdn);
+                    break;
+
+                default:
+                    console.warn('Unknown command:', command);
+            }
+            
+        } catch (error) {
+            console.error('Error processing message:', error);
+            ws.send(JSON.stringify({ type: 'error', error: error.message }));
+        }
+    });
+});

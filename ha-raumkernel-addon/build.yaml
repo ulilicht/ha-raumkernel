@@ -1,0 +1,11 @@
+# https://developers.home-assistant.io/docs/add-ons/configuration#add-on-dockerfile
+build_from:
+  aarch64: "ghcr.io/home-assistant/aarch64-base:3.20"
+  amd64: "ghcr.io/home-assistant/amd64-base:3.20"
+labels:
+  org.opencontainers.image.title: "Raumkernel - Raumfeld for Homeassistant"
+  org.opencontainers.image.description: "Raumkernel add-on to bridge Raumfeld devices to Home Assistant"
+  org.opencontainers.image.source: "https://github.com/ulilicht/ha-raumkernel"
+  org.opencontainers.image.licenses: "MIT"
+args:
+  TEMPIO_VERSION: "2021.09.0"

@@ -1,0 +1,10 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start the Raumkernel service
+# ==============================================================================
+
+bashio::log.info "Starting Raumkernel..."
+
+## Run your program
+cd /app
+exec node index.js
