@@ -5,6 +5,7 @@
   "config_flow": true,
   "dependencies": ["hassio"],
   "documentation": "https://github.com/ulilicht/ha-raumkernel",
+  "integration_type": "hub",
   "iot_class": "local_push",
   "integration_type": "hub",
   "issue_tracker": "https://github.com/ulilicht/ha-raumkernel/issues",
