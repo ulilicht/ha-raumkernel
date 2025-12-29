@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "ha-raumkernel-addon/**"
   pull_request:
     branches:
       - main
+    paths:
+      - "ha-raumkernel-addon/**"
   schedule:
     - cron: "0 0 * * *"
 

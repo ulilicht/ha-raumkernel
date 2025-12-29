@@ -1,0 +1,23 @@
+name: Validate with Hassfest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "custom_components/raumfeld/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "custom_components/raumfeld/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.1
+
+      - name: Hassfest
+        uses: home-assistant/actions/hassfest@master

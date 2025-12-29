@@ -1,0 +1,29 @@
+name: HACS Action
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "hacs.json"
+      - "custom_components/raumfeld/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "hacs.json"
+      - "custom_components/raumfeld/**"
+  workflow_dispatch:
+
+jobs:
+  hacs:
+    name: HACS Action
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: HACS Action
+        uses: hacs/action@main
+        with:
+          category: integration

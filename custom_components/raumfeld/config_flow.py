@@ -1,10 +1,9 @@
 """Config flow for Raumfeld integration."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.data_entry_flow import FlowResult
@@ -12,7 +11,7 @@ from homeassistant.data_entry_flow import FlowResult
 from .const import DOMAIN
 
 try:
-    from homeassistant.components.hassio import is_hassio, get_addon_info
+    from homeassistant.components.hassio import get_addon_info, is_hassio
 
     HASSIO_AVAILABLE = True
 except ImportError:
@@ -34,10 +33,10 @@ class RaumfeldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        errors: Dict[str, str] = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             # validate connection here if needed

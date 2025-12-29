@@ -1,8 +1,9 @@
 """Media Player for Raumfeld."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.media_player import (
     BrowseMedia,
     MediaPlayerEntity,
@@ -13,12 +14,11 @@ from homeassistant.components.media_player.const import MediaClass, MediaType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
-import voluptuous as vol
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .api import RaumfeldApiClient
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def async_setup_entry(
     known_udns = set()
 
     @callback
-    def handle_message(data: Dict[str, Any]) -> None:
+    def handle_message(data: dict[str, Any]) -> None:
         if data.get("type") in ("zones", "zoneStateChanged"):
             rooms = data.get("payload", [])
             new_entities = []
@@ -76,7 +76,7 @@ async def async_setup_entry(
 class RaumfeldMediaPlayer(MediaPlayerEntity):
     """Raumfeld Media Player Entity."""
 
-    def __init__(self, client: RaumfeldApiClient, room_data: Dict[str, Any]) -> None:
+    def __init__(self, client: RaumfeldApiClient, room_data: dict[str, Any]) -> None:
         """Initialize."""
         self._client = client
         self._udn = room_data["udn"]
@@ -99,7 +99,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._client.register_listener(self._handle_event)
 
     @callback
-    def _handle_event(self, data: Dict[str, Any]) -> None:
+    def _handle_event(self, data: dict[str, Any]) -> None:
         """Handle incoming events."""
         if data.get("type") in ("zones", "zoneStateChanged"):
             rooms = data.get("payload", [])
@@ -116,7 +116,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
                     self.async_write_ha_state()
                     break
 
-    def update_state(self, room_data: Dict[str, Any]) -> None:
+    def update_state(self, room_data: dict[str, Any]) -> None:
         """Update state from data."""
         self._attr_available = True
 
@@ -170,7 +170,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_supported_features = features
 
     @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
             "room_udn": self._udn,
@@ -276,8 +276,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
     async def async_browse_media(
         self,
-        media_content_type: Optional[str] = None,
-        media_content_id: Optional[str] = None,
+        media_content_type: str | None = None,
+        media_content_id: str | None = None,
     ) -> BrowseMedia:
         """Browse media."""
         if media_content_id is None:

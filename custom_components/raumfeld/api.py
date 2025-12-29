@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import aiohttp
 
@@ -23,8 +24,8 @@ class RaumfeldApiClient:
         self._host = host
         self._port = port
         self._session = session
-        self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
-        self._listeners: List[Callable[[Dict[str, Any]], None]] = []
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._listeners: list[Callable[[dict[str, Any]], None]] = []
         self._loop = asyncio.get_running_loop()
 
     @property
@@ -101,7 +102,7 @@ class RaumfeldApiClient:
                 )
                 break
 
-    def _dispatch_event(self, data: Dict[str, Any]) -> None:
+    def _dispatch_event(self, data: dict[str, Any]) -> None:
         """Dispatch events to listeners."""
         for listener in self._listeners:
             try:
@@ -109,11 +110,11 @@ class RaumfeldApiClient:
             except Exception as err:
                 _LOGGER.error("Error in listener: %s", err)
 
-    def register_listener(self, listener: Callable[[Dict[str, Any]], None]) -> None:
+    def register_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
         """Register a message listener."""
         self._listeners.append(listener)
 
-    async def send_command(self, command: str, payload: Dict[str, Any]) -> None:
+    async def send_command(self, command: str, payload: dict[str, Any]) -> None:
         """Send a command."""
         if not self._ws or self._ws.closed:
             _LOGGER.error("Not connected to Raumfeld Add-on (ws=%s)", self._ws)
@@ -127,7 +128,7 @@ class RaumfeldApiClient:
         """Request zones."""
         await self.send_command("getZones", {})
 
-    async def play(self, room_udn: str, stream_url: Optional[str] = None) -> None:
+    async def play(self, room_udn: str, stream_url: str | None = None) -> None:
         """Play."""
         await self.send_command("play", {"roomUdn": room_udn, "streamUrl": stream_url})
 
@@ -155,11 +156,11 @@ class RaumfeldApiClient:
         """Set mute."""
         await self.send_command("setMute", {"roomUdn": room_udn, "mute": mute})
 
-    async def browse(self, object_id: str) -> List[Dict[str, Any]]:
+    async def browse(self, object_id: str) -> list[dict[str, Any]]:
         """Browse media."""
         future = self._loop.create_future()
 
-        def _response_handler(data: Dict[str, Any]) -> None:
+        def _response_handler(data: dict[str, Any]) -> None:
             if (
                 data.get("type") == "browseResult"
                 and data.get("payload", {}).get("objectId") == object_id
@@ -172,7 +173,7 @@ class RaumfeldApiClient:
         try:
             await self.send_command("browse", {"objectId": object_id})
             return await asyncio.wait_for(future, timeout=10.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout waiting for browse result for %s", object_id)
             return []
         finally:

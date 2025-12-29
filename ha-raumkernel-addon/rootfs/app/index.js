@@ -9,7 +9,7 @@ try {
         const options = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
         if (options.PORT) PORT = options.PORT;
     }
-} catch (err) {
+} catch {
     console.warn('Failed to read /data/options.json, using default port 3000');
 }
 if (process.env.PORT) PORT = process.env.PORT;
@@ -33,13 +33,13 @@ rkHelper.raumkernel.on('systemReady', (ready) => {
     broadcast({ type: 'systemReady', payload: ready });
 });
 
-rkHelper.raumkernel.on('combinedZoneStateChanged', (state) => {
+rkHelper.raumkernel.on('combinedZoneStateChanged', () => {
     // rkHelper handles the update internally via its own listener
     const zones = rkHelper.getState().availableRooms;
     broadcast({ type: 'zoneStateChanged', payload: zones });
 });
 
-rkHelper.raumkernel.on('rendererStateChanged', (renderer, state) => {
+rkHelper.raumkernel.on('rendererStateChanged', () => {
      // This might be too noisy, but useful for real-time updates
      // Ideally we map this back to the Zone it belongs to or send generic update
      // For minimal implementation, rely on periodic or major events, or implement granular updates.
@@ -108,16 +108,17 @@ wss.on('connection', (ws) => {
                     await rkHelper.load(payload.roomUdn, payload.url);
                     break;
 
-                case 'browse':
+                case 'browse': {
                     const items = await rkHelper.browse(payload.objectId);
                     ws.send(JSON.stringify({ 
                         type: 'browseResult', 
                         payload: { 
                             objectId: payload.objectId, 
                             items: items 
-                        } 
+                        }     
                     }));
                     break;
+                }
 
                 case 'loadContainer':
                     await rkHelper.loadContainer(payload.roomUdn, payload.containerId);
