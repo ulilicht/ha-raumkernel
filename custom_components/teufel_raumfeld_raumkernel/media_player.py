@@ -82,6 +82,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._udn = room_data["udn"]
         self._attr_name = room_data.get("name")
         self._attr_unique_id = self._udn
+        self._attr_icon = "mdi:speaker-multiple"
         self.update_state(room_data)
 
     @property

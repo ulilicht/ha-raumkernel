@@ -26,7 +26,7 @@ It consists of:
 ### 2. Install the Integration
 
 1. Ensure the Add-on is running.
-2. If using HACS, add this repository as a **Custom Repository** (Type: Integration).
+2. If using HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
 4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 5. Configure the host (local IP of your HA instance) and port (`3000`).
