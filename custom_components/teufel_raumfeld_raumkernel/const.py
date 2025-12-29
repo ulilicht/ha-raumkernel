@@ -1,3 +1,3 @@
 """Constants for the Raumfeld integration."""
 
-DOMAIN = "raumfeld"
+DOMAIN = "teufel_raumfeld_raumkernel"

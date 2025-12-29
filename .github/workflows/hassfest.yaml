@@ -5,12 +5,12 @@ on:
     branches:
       - main
     paths:
-      - "custom_components/raumfeld/**"
+      - "custom_components/teufel_raumfeld_raumkernel/**"
   pull_request:
     branches:
       - main
     paths:
-      - "custom_components/raumfeld/**"
+      - "custom_components/teufel_raumfeld_raumkernel/**"
 
 jobs:
   validate:

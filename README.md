@@ -17,7 +17,7 @@ It consists of:
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
 2. Add this repository URL to your repositories.
-3. Install **Raumkernel - Raumfeld for Homeassistant**.
+3. Install **Teufel Raumfeld (Raumkernel Addon)**.
 4. **Start** the Add-on. The default WebSocket port is `3000`.
 
 ### 2. Install the Integration
@@ -25,7 +25,7 @@ It consists of:
 1. Ensure the Add-on is running.
 2. If using HACS, add this repository as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
-4. Go to **Settings > Devices & Services > Add Integration** and search for **Raumfeld**.
+4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 5. Configure the host (local IP of your HA instance) and port (`3000`).
 
 ## Key Concepts: Rooms vs Zones
@@ -48,7 +48,7 @@ Understanding how Raumfeld organizes devices is key to using this integration:
 ## Project Structure
 
 - `ha-raumkernel-addon/`: Node.js Add-on source.
-- `custom_components/raumfeld/`: Python Integration source.
+- `custom_components/teufel_raumfeld_raumkernel/`: Python Integration source.
 
 ## License
 

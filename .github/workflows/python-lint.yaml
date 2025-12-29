@@ -5,13 +5,13 @@ on:
     branches:
       - main
     paths:
-      - "custom_components/raumfeld/**.py"
+      - "custom_components/teufel_raumfeld_raumkernel/**.py"
       - "pyproject.toml"
   pull_request:
     branches:
       - main
     paths:
-      - "custom_components/raumfeld/**.py"
+      - "custom_components/teufel_raumfeld_raumkernel/**.py"
       - "pyproject.toml"
 
 jobs:
@@ -22,4 +22,4 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/ruff-action@v3
         with:
-          args: "check custom_components/raumfeld"
+          args: "check custom_components/teufel_raumfeld_raumkernel"

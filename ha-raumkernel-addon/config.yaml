@@ -1,10 +1,9 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
-name: "Raumkernel - Raumfeld for Homeassistant"
+name: "Teufel Raumfeld (Raumkernel Addon)"
 version: "1.2.0"
 slug: ha-raumkernel-addon
 description: "Home Assistant Add-on for Teufel Raumfeld devices, providing a WebSocket API for the Raumfeld integration."
 url: "https://github.com/ulilicht/ha-raumkernel"
-startup: application
 arch:
   - aarch64
   - amd64

@@ -37,7 +37,7 @@ ssh $USER@$HOST "mkdir -p $INTEGRATION_PATH"
 CHANGED_FILES=$(rsync -avz --delete --itemize-changes \
   --exclude '__pycache__' \
   --exclude '.DS_Store' \
-  custom_components/raumfeld/ "$USER@$HOST:$INTEGRATION_PATH" | grep '^>f' | awk '{print $2}')
+  custom_components/teufel_raumfeld_raumkernel/ "$USER@$HOST:$INTEGRATION_PATH" | grep '^>f' | awk '{print $2}')
 
 # Clear Python bytecode cache to avoid stale code
 echo "Clearing Python cache..."

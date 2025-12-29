@@ -1,4 +1,4 @@
-"""API Client for Raumfeld Add-on."""
+"""API Client for Teufel Raumfeld (Raumkernel Addon)."""
 
 import asyncio
 import json
@@ -12,7 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class RaumfeldApiClient:
-    """Raumfeld API Client."""
+    """Teufel Raumfeld API Client."""
 
     def __init__(
         self,
@@ -44,7 +44,9 @@ class RaumfeldApiClient:
             try:
                 _LOGGER.debug("Connecting to %s", url)
                 self._ws = await self._session.ws_connect(url)
-                _LOGGER.info("Connected to Raumfeld Add-on at %s", url)
+                _LOGGER.info(
+                    "Connected to Teufel Raumfeld (Raumkernel Addon) at %s", url
+                )
 
                 # Fetch initial state
                 await self.get_zones()
@@ -53,7 +55,8 @@ class RaumfeldApiClient:
                 await self._listen()
 
                 _LOGGER.warning(
-                    "Disconnected from Raumfeld Add-on. Reconnecting in 5s..."
+                    "Disconnected from Teufel Raumfeld (Raumkernel Addon). "
+                    "Reconnecting in 5s..."
                 )
 
             except asyncio.CancelledError:
@@ -61,7 +64,8 @@ class RaumfeldApiClient:
                 raise
             except (aiohttp.ClientError, OSError) as err:
                 _LOGGER.warning(
-                    "Failed to connect to Raumfeld Add-on at %s: %s. Retrying in 5s...",
+                    "Failed to connect to Teufel Raumfeld (Raumkernel Addon) at "
+                    "%s: %s. Retrying in 5s...",
                     url,
                     str(err) or type(err).__name__,
                 )
@@ -117,8 +121,10 @@ class RaumfeldApiClient:
     async def send_command(self, command: str, payload: dict[str, Any]) -> None:
         """Send a command."""
         if not self._ws or self._ws.closed:
-            _LOGGER.error("Not connected to Raumfeld Add-on (ws=%s)", self._ws)
-            raise ConnectionError("Not connected to Raumfeld Add-on")
+            _LOGGER.error(
+                "Not connected to Teufel Raumfeld (Raumkernel Addon) (ws=%s)", self._ws
+            )
+            raise ConnectionError("Not connected to Teufel Raumfeld (Raumkernel Addon)")
 
         _LOGGER.info("Sending command %s with payload %s", command, payload)
         msg = {"command": command, "payload": payload}

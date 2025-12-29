@@ -16,4 +16,4 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["custom_components.raumfeld"]
+known-first-party = ["custom_components.teufel_raumfeld_raumkernel"]

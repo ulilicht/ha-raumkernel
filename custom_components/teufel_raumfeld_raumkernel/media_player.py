@@ -1,4 +1,4 @@
-"""Media Player for Raumfeld."""
+"""Media Player for Teufel Raumfeld."""
 
 import logging
 from typing import Any
@@ -28,7 +28,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the Raumfeld media player."""
+    """Set up the Teufel Raumfeld media player."""
     client: RaumfeldApiClient = hass.data[DOMAIN][entry.entry_id]
 
     platform = entity_platform.async_get_current_platform()
@@ -74,7 +74,7 @@ async def async_setup_entry(
 
 
 class RaumfeldMediaPlayer(MediaPlayerEntity):
-    """Raumfeld Media Player Entity."""
+    """Teufel Raumfeld Media Player Entity."""
 
     def __init__(self, client: RaumfeldApiClient, room_data: dict[str, Any]) -> None:
         """Initialize."""
@@ -329,7 +329,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # Ideally we would get info about the parent from the API,
         # but for now we construct a generic parent.
         return BrowseMedia(
-            title="Raumfeld",
+            title="Teufel Raumfeld",
             media_class=MediaClass.DIRECTORY,
             media_content_id=media_content_id,
             media_content_type="container",

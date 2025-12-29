@@ -6,13 +6,13 @@ on:
       - main
     paths:
       - "hacs.json"
-      - "custom_components/raumfeld/**"
+      - "custom_components/teufel_raumfeld_raumkernel/**"
   pull_request:
     branches:
       - main
     paths:
       - "hacs.json"
-      - "custom_components/raumfeld/**"
+      - "custom_components/teufel_raumfeld_raumkernel/**"
   workflow_dispatch:
 
 jobs:
