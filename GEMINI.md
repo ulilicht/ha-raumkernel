@@ -5,7 +5,7 @@
 This project controls Teufel Raumfeld devices via Home Assistant. It consists of:
 
 1.  **Add-on**: `ha-raumkernel-addon` (Node.js/TypeScript) which wraps `node-raumkernel`.
-2.  **Integration**: `custom_components/raumfeld` (Python) which communicates with the Add-on.
+2.  **Integration**: `custom_components/teufel_raumfeld_raumkernel` (Python) which communicates with the Add-on.
 
 ## Development Workflow
 
@@ -24,7 +24,7 @@ _This script syncs files, automatically rebuilds/restarts the Add-on, and determ
 ### 2. File Structure
 
 - **Add-on Logic**: `/ha-raumkernel-addon/rootfs/app/` (Node.js code)
-- **Integration Logic**: `/custom_components/raumfeld/` (Python code)
+- **Integration Logic**: `/custom_components/teufel_raumfeld_raumkernel/` (Python code)
 - **Example code**: `.prompt/example-code/` (Example code which must not be changed. It is there to add context for an AI coding assistant if it needs to understand more about how to steer raumfeld devices.) example-code must not be modified.
 
 ## Coding Guidelines

@@ -1,9 +1,9 @@
 play_system_sound:
   name: Play System Sound
-  description: Plays a system sound on the Raumfeld device.
+  description: Plays a system sound on the Teufel Raumfeld device.
   target:
     entity:
-      integration: raumfeld
+      integration: teufel_raumfeld_raumkernel
       domain: media_player
   fields:
     sound_id:

@@ -1,6 +1,7 @@
 {
-  "domain": "raumfeld",
-  "name": "Raumfeld",
+  "domain": "teufel_raumfeld_raumkernel",
+  "name": "Teufel Raumfeld (Raumkernel Addon)",
+  "brand": "teufel_raumfeld",
   "codeowners": ["@ulilicht"],
   "config_flow": true,
   "dependencies": ["hassio"],

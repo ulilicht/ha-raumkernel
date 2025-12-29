@@ -1,4 +1,4 @@
-"""Config flow for Raumfeld integration."""
+"""Config flow for Teufel Raumfeld (Raumkernel Addon) integration."""
 
 import logging
 from typing import Any
@@ -28,7 +28,7 @@ DATA_SCHEMA = vol.Schema(
 
 
 class RaumfeldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Raumfeld."""
+    """Handle a config flow for Teufel Raumfeld (Raumkernel Addon)."""
 
     VERSION = 1
 
@@ -40,7 +40,9 @@ class RaumfeldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # validate connection here if needed
-            return self.async_create_entry(title="Raumfeld", data=user_input)
+            return self.async_create_entry(
+                title="Teufel Raumfeld (Raumkernel Addon)", data=user_input
+            )
 
         # Try to discover addon if running on Hass.io
         host = "localhost"
@@ -51,7 +53,7 @@ class RaumfeldConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 try:
                     info = await get_addon_info(self.hass, slug)
                     if info and info.get("state") == "started":
-                        _LOGGER.debug("Found Raumfeld addon: %s", slug)
+                        _LOGGER.debug("Found Raumfeld (Raumkernel) addon: %s", slug)
                         port = info.get("options", {}).get("PORT", 3000)
                         break
                 except Exception:  # pylint: disable=broad-except
