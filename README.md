@@ -16,7 +16,10 @@ It consists of:
 ### 1. Install the Add-on
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
-2. Add this repository URL to your repositories.
+2. Add the repository:
+
+   [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+
 3. Install **Teufel Raumfeld (Raumkernel Addon)**.
 4. **Start** the Add-on. The default WebSocket port is `3000`.
 
