@@ -2,6 +2,8 @@
 
 This project provides a Home Assistant integration for Teufel Raumfeld devices, based on `node-raumkernel`.
 
+_The Project is primarily AI generated, with some manual adjustments. Use with caution._
+
 It consists of:
 
 - A **Home Assistant Add-on** wrapping node-raumkernel and exposing a WebSocket API.
