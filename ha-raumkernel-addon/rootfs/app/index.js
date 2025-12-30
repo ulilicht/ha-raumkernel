@@ -168,6 +168,16 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
+                case 'joinGroup':
+                    // payload: { roomUdn, zoneUdn }
+                    await rkHelper.joinGroup(payload.roomUdn, payload.zoneUdn);
+                    break;
+                    
+                case 'leaveGroup':
+                    // payload: { roomUdn }
+                    await rkHelper.leaveGroup(payload.roomUdn);
+                    break;
+
 
                 default:
                     console.warn('Unknown command:', command);

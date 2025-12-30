@@ -138,7 +138,16 @@ class RaumkernelHelper {
         this.raumkernel.on('systemReady', (ready) => {
             console.log(`${LOG_PREFIX.REGISTRY} System ready: ${ready}`);
             this._state.isReady = ready;
-            if (ready) this._refreshRoomRegistry();
+            if (ready) {
+                this._refreshRoomRegistry();
+                
+                // Process initial zone state
+                const zoneManager = this._getZoneManager();
+                if (zoneManager && zoneManager.zoneState) {
+                    console.log(`${LOG_PREFIX.REGISTRY} Processing initial zone state`);
+                    this._handleZoneStateChange(zoneManager.zoneState);
+                }
+            }
         });
 
         this.raumkernel.on('systemHostLost', () => {
@@ -244,9 +253,13 @@ class RaumkernelHelper {
 
         // Apply zone mappings from state
         for (const zone of combinedState.zones) {
+            // Log zone details for debugging
+            // console.log(`${LOG_PREFIX.REGISTRY} Processing zone: ${zone.udn} (isZone: ${zone.isZone}, name: ${zone.name})`);
+            
             if (!zone.isZone) continue;
 
             const memberUdns = zone.rooms?.map(r => r.udn) ?? [];
+            console.log(`${LOG_PREFIX.REGISTRY} Zone ${zone.name} (${zone.udn}) has members: ${memberUdns.join(', ')}`);
             
             for (const memberUdn of memberUdns) {
                 const room = this._findRoomByAnyUdn(memberUdn);
@@ -254,6 +267,9 @@ class RaumkernelHelper {
                     room.zoneUdn = zone.udn;
                     room.zoneMembers = memberUdns;
                     room.zoneName = zone.name;
+                    // console.log(`${LOG_PREFIX.REGISTRY} Mapped room ${room.name} to zone ${zone.name}`);
+                } else {
+                    console.warn(`${LOG_PREFIX.REGISTRY} Could not find room for member UDN: ${memberUdn}`);
                 }
             }
         }
@@ -704,6 +720,149 @@ class RaumkernelHelper {
         } catch (err) {
              console.error(`${LOG_PREFIX.COMMAND} Failed to enter standby for ${room.name}: ${err.message}`);
              throw err; // Re-throw so caller knows it failed
+        }
+    }
+
+    // ========================================================================
+    // GROUPING COMMANDS
+    // ========================================================================
+
+    async joinGroup(roomIdentifier, zoneIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) {
+             console.warn(`${LOG_PREFIX.COMMAND} joinGroup: Room not found for identifier ${roomIdentifier}`);
+             return;
+        }
+
+        const zoneManager = this._getZoneManager();
+        const deviceManager = this._getDeviceManager();
+        if (!zoneManager || !deviceManager) {
+            console.error(`${LOG_PREFIX.COMMAND} joinGroup failed: managers not available`);
+            return;
+        }
+
+        // Resolve target zone UDN
+        let targetZoneUdn = zoneIdentifier;
+        const targetRoom = this.findRoom(zoneIdentifier);
+        
+        // Check if target has a valid zone
+        if (targetRoom) {
+            if (targetRoom.zoneUdn) {
+                targetZoneUdn = targetRoom.zoneUdn;
+            } else {
+                // Target room exists but has no zone (likely Spotify mode)
+                // We need to create a zone for the target first
+                console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} has no zone (likely Spotify mode), creating zone first`);
+                
+                try {
+                    // Create a standalone zone for the target room to force UPnP mode
+                    await zoneManager.connectRoomToZone(targetRoom.roomUdn, '', false);
+                    
+                    // Wait for the zone to be created
+                    const maxAttempts = 15;
+                    let targetZoneCreated = false;
+                    for (let i = 0; i < maxAttempts; i++) {
+                        const newZoneUdn = zoneManager.getZoneUDNFromRoomUDN(targetRoom.roomUdn);
+                        if (newZoneUdn && deviceManager.mediaRenderersVirtual.has(newZoneUdn)) {
+                            console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} now has zone: ${newZoneUdn}`);
+                            targetZoneUdn = newZoneUdn;
+                            targetZoneCreated = true;
+                            
+                            // Wait for the Raumfeld host to stabilize after zone creation
+                            // Without this delay, immediate join attempts may silently fail
+                            // Increased to 4s as 1.5s was sometimes insufficient
+                            console.log(`${LOG_PREFIX.COMMAND} Waiting for zone to stabilize...`);
+                            await this._delay(4000);
+                            break;
+                        }
+                        if (i < maxAttempts - 1) {
+                            await this._delay(500);
+                        }
+                    }
+                    
+                    if (!targetZoneCreated) {
+                        console.warn(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} zone creation may not have completed`);
+                        // Use room UDN as fallback
+                        targetZoneUdn = targetRoom.roomUdn;
+                    }
+                } catch (err) {
+                    console.warn(`${LOG_PREFIX.COMMAND} Failed to create zone for target ${targetRoom.name}: ${err.message}`);
+                    targetZoneUdn = targetRoom.roomUdn;
+                }
+            }
+        }
+
+        console.log(`${LOG_PREFIX.COMMAND} Joining ${room.name} (${room.roomUdn}) to zone ${targetZoneUdn}`);
+
+        // Check if the room being joined currently has a virtual renderer (i.e., is in UPnP mode)
+        // If not, the room is likely in Spotify Connect mode and needs to be transitioned first
+        let roomHasVirtualRenderer = false;
+        const currentZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+        if (currentZoneUdn && deviceManager.mediaRenderersVirtual.has(currentZoneUdn)) {
+            roomHasVirtualRenderer = true;
+        }
+        
+        if (!roomHasVirtualRenderer) {
+            // Room is likely in Spotify Connect mode - transition it to UPnP mode first
+            // by creating a standalone zone for it
+            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} has no virtual renderer (likely Spotify mode), transitioning to UPnP mode first`);
+            
+            try {
+                // Create a standalone zone for this room to force UPnP mode
+                await zoneManager.connectRoomToZone(room.roomUdn, '', false);
+                
+                // Wait for the zone and virtual renderer to be created
+                const maxAttempts = 15;
+                let transitioned = false;
+                for (let i = 0; i < maxAttempts; i++) {
+                    const newZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+                    if (newZoneUdn && deviceManager.mediaRenderersVirtual.has(newZoneUdn)) {
+                        console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} successfully transitioned to UPnP mode (zone: ${newZoneUdn})`);
+                        transitioned = true;
+                        break;
+                    }
+                    if (i < maxAttempts - 1) {
+                        await this._delay(500);
+                    }
+                }
+                
+                if (!transitioned) {
+                    console.warn(`${LOG_PREFIX.COMMAND} Room ${room.name} may not have fully transitioned to UPnP mode, attempting join anyway`);
+                }
+            } catch (err) {
+                console.warn(`${LOG_PREFIX.COMMAND} Failed to create standalone zone for ${room.name}: ${err.message}`);
+                // Continue anyway - the main connectRoomToZone might still work
+            }
+        }
+        
+        // Now connect room to the target zone
+        try {
+            await zoneManager.connectRoomToZone(room.roomUdn, targetZoneUdn);
+            console.log(`${LOG_PREFIX.COMMAND} Successfully joined ${room.name} to zone ${targetZoneUdn}`);
+        } catch (err) {
+            console.error(`${LOG_PREFIX.COMMAND} joinGroup failed: ${err.message}`);
+            throw err;
+        }
+    }
+
+    async leaveGroup(roomIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) {
+             console.warn(`${LOG_PREFIX.COMMAND} leaveGroup: Room not found for identifier ${roomIdentifier}`);
+             return;
+        }
+
+        console.log(`${LOG_PREFIX.COMMAND} Removing ${room.name} (${room.roomUdn}) from zone`);
+
+        const zoneManager = this._getZoneManager();
+        if (zoneManager) {
+            try {
+                // dropRoomFromZone takes the room UDN
+                await zoneManager.dropRoomFromZone(room.roomUdn);
+            } catch (err) {
+                console.error(`${LOG_PREFIX.COMMAND} leaveGroup failed: ${err.message}`);
+                throw err;
+            }
         }
     }
 

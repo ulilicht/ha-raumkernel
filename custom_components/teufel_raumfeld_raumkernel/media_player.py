@@ -168,6 +168,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         if now_playing.get("canPlayPrev"):
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
 
+        features |= MediaPlayerEntityFeature.GROUPING
+
         self._attr_supported_features = features
 
     @property
@@ -179,6 +181,44 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             "current_zone_udn": self._current_zone_udn,
             "zone_members": self._zone_members,
         }
+
+    @property
+    def group_members(self) -> list[str] | None:
+        """Return a list of entity IDs that are in the same group."""
+        if not self._zone_members or len(self._zone_members) <= 1:
+            return None
+
+        # Resolve UDNs to Entity IDs
+        members = []
+
+        # Get all media_player entities
+        all_states = self.hass.states.async_all("media_player")
+
+        _LOGGER.warning(
+            "[DEBUG group_members] Entity %s: zone_members=%s, checking %d states",
+            self.entity_id,
+            self._zone_members,
+            len(all_states),
+        )
+
+        for state in all_states:
+            room_udn = state.attributes.get("room_udn")
+            if room_udn:
+                _LOGGER.warning(
+                    "[DEBUG group_members] Checking %s: room_udn=%s, in_members=%s",
+                    state.entity_id,
+                    room_udn,
+                    room_udn in self._zone_members,
+                )
+            if room_udn in self._zone_members:
+                members.append(state.entity_id)
+
+        _LOGGER.warning(
+            "[DEBUG group_members] Entity %s: resolved members=%s",
+            self.entity_id,
+            members,
+        )
+        return members if members else None
 
     async def async_media_play(self) -> None:
         """Play."""
@@ -247,6 +287,83 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         except Exception as err:
             _LOGGER.error("Failed to skip previous %s: %s", self._udn, err)
             raise
+
+    async def async_join_players(self, group_members: list[str]) -> None:
+        """Join `group_members` to the current entity (master).
+
+        In Home Assistant's grouping semantics:
+        - self = the master/target entity (where you want to group TO)
+        - group_members = entities that should join the master
+        """
+        _LOGGER.warning(
+            "[GROUPING DEBUG] async_join_players called on MASTER: %s "
+            "(UDN: %s, entity_id: %s)",
+            self.name,
+            self._udn,
+            self.entity_id,
+        )
+        _LOGGER.warning(
+            "[GROUPING DEBUG] Master's current_zone_udn: %s",
+            self._current_zone_udn,
+        )
+        _LOGGER.warning(
+            "[GROUPING DEBUG] group_members parameter (entities to JOIN to master): %s",
+            group_members,
+        )
+
+        # The master's zone UDN is where members will be joined TO
+        master_zone_udn = self._current_zone_udn
+        if not master_zone_udn:
+            # Fallback: If current_zone_udn is missing (e.g., Spotify Connect mode),
+            # use the room's UDN. The addon's joinGroup will handle the mode transition.
+            _LOGGER.warning(
+                "[GROUPING DEBUG] Master %s has no zone_udn "
+                "(Spotify mode?), using room_udn: %s",
+                self.name,
+                self._udn,
+            )
+            master_zone_udn = self._udn
+
+        _LOGGER.warning(
+            "[GROUPING DEBUG] Will join members TO zone: %s",
+            master_zone_udn,
+        )
+
+        # Join each member TO the master's zone
+        for member_entity_id in group_members:
+            state = self.hass.states.get(member_entity_id)
+            if not state:
+                _LOGGER.warning(
+                    "[GROUPING DEBUG] Could not find state for member %s",
+                    member_entity_id,
+                )
+                continue
+
+            member_room_udn = state.attributes.get("room_udn")
+            _LOGGER.warning(
+                "[GROUPING DEBUG] Member %s has room_udn: %s (all attrs: %s)",
+                member_entity_id,
+                member_room_udn,
+                {k: v for k, v in state.attributes.items() if "udn" in k.lower()},
+            )
+            if not member_room_udn:
+                _LOGGER.warning(
+                    "[GROUPING DEBUG] Member %s has no room_udn attribute, skipping",
+                    member_entity_id,
+                )
+                continue
+
+            _LOGGER.warning(
+                "[GROUPING DEBUG] Sending joinGroup: room=%s to zone=%s",
+                member_room_udn,
+                master_zone_udn,
+            )
+            await self._client.join_group(member_room_udn, master_zone_udn)
+
+    async def async_unjoin_player(self) -> None:
+        """Remove this player from any group."""
+        _LOGGER.info("Unjoining %s (%s)", self.name, self._udn)
+        await self._client.leave_group(self._udn)
 
     async def async_play_media(
         self, media_type: MediaType | str, media_id: str, **kwargs: Any

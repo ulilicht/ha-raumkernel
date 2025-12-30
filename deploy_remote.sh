@@ -48,8 +48,28 @@ if [ -z "$ADDON_SLUG" ]; then
 fi
 
 echo "Updating/Rebuilding Add-on ($ADDON_SLUG)..."
-# Try update first (for version bumps), fall back to rebuild if not available
-ssh $USER@$HOST "ha addons update $ADDON_SLUG || ha addons rebuild $ADDON_SLUG && ha addons restart $ADDON_SLUG"
+# Reload supervisor to pick up changes
+ssh $USER@$HOST "ha supervisor reload"
+
+# Rebuild (for code changes) or Install (if new)
+# We skip 'update' because it errors if no version bump, which confuses the logic.
+ssh $USER@$HOST "ha addons rebuild $ADDON_SLUG || ha addons install $ADDON_SLUG"
+
+# Wait a moment for rebuild to complete
+echo "Waiting for rebuild to complete..."
+sleep 2
+
+# Restart to ensure new code is running
+echo "Restarting Add-on to load new code..."
+ssh $USER@$HOST "ha addons restart $ADDON_SLUG"
+
+# Wait for addon to start
+echo "Waiting for Add-on to start..."
+sleep 3
+
+# Verify addon is running
+echo "Verifying Add-on status..."
+ssh $USER@$HOST "ha addons info $ADDON_SLUG | grep -E 'state:|version:'"
 
 
 # Restart Home Assistant Core
