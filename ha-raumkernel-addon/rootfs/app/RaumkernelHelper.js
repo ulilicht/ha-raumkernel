@@ -259,7 +259,7 @@ class RaumkernelHelper {
             if (!zone.isZone) continue;
 
             const memberUdns = zone.rooms?.map(r => r.udn) ?? [];
-            console.log(`${LOG_PREFIX.REGISTRY} Zone ${zone.name} (${zone.udn}) has members: ${memberUdns.join(', ')}`);
+            // console.log(`${LOG_PREFIX.REGISTRY} Zone ${zone.name} (${zone.udn}) has members: ${memberUdns.join(', ')}`);
             
             for (const memberUdn of memberUdns) {
                 const room = this._findRoomByAnyUdn(memberUdn);
