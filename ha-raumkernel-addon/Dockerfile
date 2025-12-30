@@ -10,7 +10,8 @@ RUN \
     apk add --no-cache \
     nodejs \
     npm \
-    git
+    git \
+    openssh-client
 
 # Copy root filesystem
 COPY rootfs /

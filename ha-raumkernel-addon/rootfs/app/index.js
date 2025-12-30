@@ -136,6 +136,39 @@ wss.on('connection', (ws) => {
                     await rkHelper.enterStandby(payload.roomUdn);
                     break;
 
+                case 'reboot': {
+                    // payload: { roomUdn }
+                    const roomInfo = rkHelper.findRoom(payload.roomUdn);
+                    
+                    if (roomInfo && roomInfo.rendererUdn) {
+                        const deviceManager = rkHelper.raumkernel.managerDisposer.deviceManager;
+                        const renderer = deviceManager.getMediaRenderer(roomInfo.rendererUdn);
+                        
+                        if (renderer) {
+                            const host = renderer.host();
+                            console.log(`Rebooting device at ${host} (${roomInfo.name})`);
+                            try {
+                                const { exec } = await import('child_process');
+                                exec(`ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${host} /sbin/reboot`, (error) => {
+                                    if (error) {
+                                        console.error(`Reboot failed for ${host}:`, error.message);
+                                        return;
+                                    }
+                                    console.log(`Reboot command sent to ${host}`);
+                                });
+                            } catch (err) {
+                                console.error(`Failed to execute reboot command:`, err.message);
+                            }
+                        } else {
+                            console.warn(`Reboot failed: renderer not found for ${roomInfo.name}`);
+                        }
+                    } else {
+                        console.warn(`Reboot failed: room not found for UDN ${payload.roomUdn}`);
+                    }
+                    break;
+                }
+
+
                 default:
                     console.warn('Unknown command:', command);
             }

@@ -43,8 +43,14 @@ CHANGED_FILES=$(rsync -avz --delete --itemize-changes \
 echo "Clearing Python cache..."
 ssh $USER@$HOST "rm -rf $INTEGRATION_PATH/__pycache__"
 
-echo "Rebuilding and starting Add-on..."
-ssh $USER@$HOST "ha addons rebuild local_ha-raumkernel-addon && ha addons start local_ha-raumkernel-addon"
+if [ -z "$ADDON_SLUG" ]; then
+  ADDON_SLUG="local_ha-raumkernel-addon"
+fi
+
+echo "Updating/Rebuilding Add-on ($ADDON_SLUG)..."
+# Try update first (for version bumps), fall back to rebuild if not available
+ssh $USER@$HOST "ha addons update $ADDON_SLUG || ha addons rebuild $ADDON_SLUG && ha addons restart $ADDON_SLUG"
+
 
 # Restart Home Assistant Core
 echo ""
