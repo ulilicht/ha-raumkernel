@@ -10,5 +10,5 @@
   "integration_type": "hub",
   "issue_tracker": "https://github.com/ulilicht/ha-raumkernel/issues",
   "requirements": [],
-  "version": "1.0.0"
+  "version": "1.2.2"
 }
