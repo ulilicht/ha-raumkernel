@@ -295,19 +295,10 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         - self = the master/target entity (where you want to group TO)
         - group_members = entities that should join the master
         """
-        _LOGGER.warning(
-            "[GROUPING DEBUG] async_join_players called on MASTER: %s "
-            "(UDN: %s, entity_id: %s)",
+        _LOGGER.debug(
+            "Grouping players. Master: %s (%s), Members to join: %s",
             self.name,
             self._udn,
-            self.entity_id,
-        )
-        _LOGGER.warning(
-            "[GROUPING DEBUG] Master's current_zone_udn: %s",
-            self._current_zone_udn,
-        )
-        _LOGGER.warning(
-            "[GROUPING DEBUG] group_members parameter (entities to JOIN to master): %s",
             group_members,
         )
 
@@ -316,45 +307,26 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         if not master_zone_udn:
             # Fallback: If current_zone_udn is missing (e.g., Spotify Connect mode),
             # use the room's UDN. The addon's joinGroup will handle the mode transition.
-            _LOGGER.warning(
-                "[GROUPING DEBUG] Master %s has no zone_udn "
-                "(Spotify mode?), using room_udn: %s",
-                self.name,
-                self._udn,
+            _LOGGER.debug(
+                "Master %s has no zone_udn (Spotify mode?), using room_udn", self.name
             )
             master_zone_udn = self._udn
-
-        _LOGGER.warning(
-            "[GROUPING DEBUG] Will join members TO zone: %s",
-            master_zone_udn,
-        )
 
         # Join each member TO the master's zone
         for member_entity_id in group_members:
             state = self.hass.states.get(member_entity_id)
             if not state:
-                _LOGGER.warning(
-                    "[GROUPING DEBUG] Could not find state for member %s",
-                    member_entity_id,
-                )
+                _LOGGER.warning("Could not find state for member %s", member_entity_id)
                 continue
 
             member_room_udn = state.attributes.get("room_udn")
-            _LOGGER.warning(
-                "[GROUPING DEBUG] Member %s has room_udn: %s (all attrs: %s)",
-                member_entity_id,
-                member_room_udn,
-                {k: v for k, v in state.attributes.items() if "udn" in k.lower()},
-            )
             if not member_room_udn:
-                _LOGGER.warning(
-                    "[GROUPING DEBUG] Member %s has no room_udn attribute, skipping",
-                    member_entity_id,
-                )
+                _LOGGER.warning("Member %s has no room_udn attribute", member_entity_id)
                 continue
 
-            _LOGGER.warning(
-                "[GROUPING DEBUG] Sending joinGroup: room=%s to zone=%s",
+            _LOGGER.debug(
+                "Joining member %s (%s) TO master zone %s",
+                member_entity_id,
                 member_room_udn,
                 master_zone_udn,
             )
