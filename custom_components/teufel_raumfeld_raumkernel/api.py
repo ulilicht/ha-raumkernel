@@ -209,3 +209,7 @@ class RaumfeldApiClient:
         await self.send_command(
             "playSystemSound", {"roomUdn": room_udn, "soundId": sound_id}
         )
+
+    async def reboot(self, room_udn: str) -> None:
+        """Reboot device."""
+        await self.send_command("reboot", {"roomUdn": room_udn})

@@ -1,0 +1,103 @@
+  PID USER       VSZ STAT COMMAND
+    1 root      2208 S    init
+    2 root         0 SW   [kthreadd]
+    3 root         0 SW   [ksoftirqd/0]
+    5 root         0 SW<  [kworker/0:0H]
+    7 root         0 SW   [rcu_preempt]
+    8 root         0 SW   [rcu_sched]
+    9 root         0 SW   [rcu_bh]
+   10 root         0 SW<  [khelper]
+   11 root         0 SW   [kdevtmpfs]
+   12 root         0 SW<  [netns]
+   13 root         0 SW<  [perf]
+   14 root         0 SW   [kworker/0:1]
+   15 root         0 SW<  [writeback]
+   16 root         0 SW<  [crypto]
+   17 root         0 SW<  [bioset]
+   18 root         0 SW<  [kblockd]
+   19 root         0 SW   [irq/157-4802a00]
+   20 root         0 SW<  [cfg80211]
+   21 root         0 SW<  [rpciod]
+   22 root         0 SW   [kswapd0]
+   23 root         0 SW   [fsnotify_mark]
+   24 root         0 SW<  [nfsiod]
+   36 root         0 SW<  [kworker/u3:0]
+   37 root         0 SW<  [kloopd]
+   41 root         0 SW<  [ipv6_addrconf]
+   42 root         0 SW<  [deferwq]
+   43 root         0 SW<  [irq/156-44e0b00]
+   44 root         0 SW   [irq/158-4819c00]
+   48 root         0 SW   [ubi_bgt0d]
+   51 root         0 SW   [ubifs_bgt0_0]
+   57 root         0 SW   [ubifs_bgt0_1]
+   62 root      2208 S    {start-raumfeld-} /bin/sh /usr/bin/start-raumfeld-syslogd.sh
+   64 root     19820 S    /usr/bin/raumfeld-syslogd
+   78 root      2208 S    /sbin/klogd
+   80 root      3520 S    /sbin/udevd -d
+   94 root         0 SW<  [MWIFIEX_WORK_QU]
+   95 root         0 SW<  [hci0]
+   96 root         0 SW<  [hci0]
+   98 root         0 SW<  [kworker/u3:2]
+  119 dbus      3004 S    dbus-daemon --system
+  144 root      2208 S    {start-connman.s} /bin/sh /usr/sbin/start-connman.sh
+  146 root      4864 S    /usr/libexec/bluetooth/bluetoothd
+  147 root      5428 S    /usr/sbin/connmand --nodaemon --nontp --nodnsproxy
+  155 root      3516 S    avahi-daemon: running [stereo-cubes.local]
+  166 root         0 SW   [ksdioirqd/mmc0]
+  174 root         0 SW   [kworker/0:3]
+  175 root      2452 S    /usr/sbin/dropbear -R -B -b /etc/issue
+  177 root      6180 S    /usr/sbin/wpa_supplicant -Dnl80211 -B -u -s -c /etc/wpa_supplicant.conf -P /var/run/wpa_supplicant.pid
+  181 root         0 SW<  [MWIFIEX_DFS_CAC]
+  182 root         0 SW<  [MWIFIEX_DFS_CHS]
+  186 root      2208 S    {start-hardwared} /bin/sh /raumfeld/hardwared/start-hardwared.sh
+  192 root         0 SW<  [MWIFIEX_DFS_CAC]
+  193 root         0 SW<  [MWIFIEX_DFS_CHS]
+  196 root      2344 S    logger -t raumfeld
+  199 root     84452 S    ./hardwared
+  203 root      2208 S    {exe} ash ./report-daemon.sh
+  206 root     18700 S    ./raumfeld-report-daemon
+  212 root      2900 S    /usr/bin/dbus-daemon --fork --print-pid 4 --print-address 6 --session
+  214 root      2208 S    {start-master-pr} /bin/sh /raumfeld/master-process/start-master-process.sh
+  215 root      2208 S    /sbin/getty -L ttyO0 115200 vt100
+  229 root      2344 S    logger -t raumfeld
+  230 root     92932 S    ./master-process
+  235 root      141m S    ./renderer
+  236 root     29268 S    ./run-bluetoothd
+  237 root     75948 S    stream-decoder
+  240 root     83464 S    ./rf-bluetoothd
+  258 root     98660 S    ./config-service
+  259 root     90992 S N  ./meta-server
+  261 root      122m S    ./stream-relay
+  262 root     82376 S    ./run-streamcastd --logfile /tmp/streamcastd.fifo
+  263 root     65508 S    ./timeserver
+  264 root      103m S    ./web-service
+  311 root     52240 S    /usr/bin/streamcastd --foreground --logfile /tmp/streamcastd.fifo
+  323 chrome    6496 S    /system/chrome/cast_cli start cast --default-eureka-name-prefix=StreamUnlimited --no-wifi --alsa-output-d
+  326 chrome    6536 S    /system/chrome/process_manager --alsa-check-close-timeout=2000 --alsa-mute-device-name=raumfeldctl --alsa
+  327 chrome   10108 S    /system/chrome/update_engine --foreground --netif-for-unique-ids=eth0 --ota-directory=/chrome/cache/ --up
+  328 chrome    5360 S N  /system/chrome/crash_uploader
+  329 chrome    441m S    /system/chrome/cast_shell --accept-resource-provider=true --alsa-enable-upsampling=false --app-config-pat
+  333 chrome    2048 S    /system/chrome/chrome-sandbox /system/chrome/cast_shell --type=zygote --vmodule=*chromecast/media/cma/*=2
+  334 chrome   72596 S    /system/chrome/cast_shell --type=zygote --vmodule=*chromecast/media/cma/*=2,*chromecast/media/service/*=2
+  337 chrome   72596 S    /system/chrome/cast_shell --type=zygote --vmodule=*chromecast/media/cma/*=2,*chromecast/media/service/*=2
+  729 root         0 SW   [kworker/u2:3]
+  793 root         0 SW   [kworker/u2:1]
+  922 root      2588 S    /usr/sbin/dropbear -R -B -b /etc/issue
+  923 root      2208 S    sh -c ps w && echo '---' && df -h && echo '---' && free -m && echo '---' && cat /proc/version
+  924 root      2344 R    ps w
+ 3477 chrome    247m S    /system/chrome/cast_shell --type=renderer --enable-media-suspend --enable-network-information-downlink-ma
+---
+Filesystem                Size      Used Available Use% Mounted on
+ubi0:RootFS             174.7M     95.1M     74.9M  56% /
+devtmpfs                117.9M         0    117.9M   0% /dev
+tmpfs                   118.0M    128.0K    117.9M   0% /dev/shm
+tmpfs                   118.0M      1.4M    116.6M   1% /tmp
+tmpfs                   118.0M     92.0K    118.0M   0% /run
+ubi0:Updates             37.1M     25.4M      9.7M  72% /update
+---
+             total       used       free     shared    buffers     cached
+Mem:        241764     222664      19100       1708          0      35852
+-/+ buffers/cache:     186812      54952
+Swap:            0          0          0
+---
+Linux version 4.0.9 (root@309ccfa7fa72) (gcc version 4.9.4 (Buildroot 2016.11.3-g3ef2490) ) #1 PREEMPT Thu Apr 25 10:18:11 UTC 2024
