@@ -196,6 +196,16 @@ class RaumkernelHelper {
             if (this._rooms.has(rendererUdn)) continue;
 
             const roomInfo = this._createRoomInfo(rendererUdn, renderer);
+            
+            // Skip rooms with empty name or roomUdn - this happens when the device
+            // is discovered before the zone configuration is available from the host.
+            // The room will be added on subsequent updates when metadata is populated.
+            if (!roomInfo.name || !roomInfo.roomUdn) {
+                console.log(`${LOG_PREFIX.REGISTRY} Skipping renderer ${rendererUdn}: ` +
+                    `incomplete metadata (name: "${roomInfo.name}", roomUdn: "${roomInfo.roomUdn}")`);
+                continue;
+            }
+            
             this._rooms.set(rendererUdn, roomInfo);
             
             console.log(`${LOG_PREFIX.REGISTRY} Added: ${roomInfo.name} ` +
