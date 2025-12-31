@@ -4,6 +4,27 @@ import RaumkernelHelper from './RaumkernelHelper.js';
 import fs from 'fs';
 
 let PORT = 3000;
+
+// Override console methods to add timestamps
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+function getTimestamp() {
+    return new Date().toISOString();
+}
+
+console.log = function(...args) {
+    originalLog(`[${getTimestamp()}]`, ...args);
+};
+
+console.warn = function(...args) {
+    originalWarn(`[${getTimestamp()}]`, ...args);
+};
+
+console.error = function(...args) {
+    originalError(`[${getTimestamp()}]`, ...args);
+};
 try {
     if (fs.existsSync('/data/options.json')) {
         const options = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
@@ -167,6 +188,16 @@ wss.on('connection', (ws) => {
                     }
                     break;
                 }
+
+                case 'joinGroup':
+                    // payload: { roomUdn, zoneUdn }
+                    await rkHelper.joinGroup(payload.roomUdn, payload.zoneUdn);
+                    break;
+                    
+                case 'leaveGroup':
+                    // payload: { roomUdn }
+                    await rkHelper.leaveGroup(payload.roomUdn);
+                    break;
 
 
                 default:

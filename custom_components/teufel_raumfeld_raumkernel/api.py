@@ -213,3 +213,11 @@ class RaumfeldApiClient:
     async def reboot(self, room_udn: str) -> None:
         """Reboot device."""
         await self.send_command("reboot", {"roomUdn": room_udn})
+
+    async def join_group(self, room_udn: str, zone_udn: str) -> None:
+        """Join a room to a zone."""
+        await self.send_command("joinGroup", {"roomUdn": room_udn, "zoneUdn": zone_udn})
+
+    async def leave_group(self, room_udn: str) -> None:
+        """Leave a zone (become standalone)."""
+        await self.send_command("leaveGroup", {"roomUdn": room_udn})
