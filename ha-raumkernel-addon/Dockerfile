@@ -17,6 +17,10 @@ RUN \
 COPY rootfs /
 
 WORKDIR /app
+
+
 RUN npm install && \
     mkdir -p lib && \
     cp node_modules/node-raumkernel/lib/setUriMetadata.template lib/
+
+
