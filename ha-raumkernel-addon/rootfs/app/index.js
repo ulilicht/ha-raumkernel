@@ -37,6 +37,25 @@ if (process.env.PORT) PORT = process.env.PORT;
 const wss = new WebSocketServer({ port: PORT });
 const rkHelper = new RaumkernelHelper();
 
+// Log startup information
+let addonVersion = 'unknown';
+try {
+    const addonPackage = JSON.parse(fs.readFileSync('/app/package.json', 'utf8'));
+    addonVersion = addonPackage.version;
+} catch {
+    console.warn('Could not read addon version from package.json');
+}
+
+let nodeRaumkernelVersion = 'unknown';
+try {
+    const rkPackage = JSON.parse(fs.readFileSync('/app/node_modules/node-raumkernel/package.json', 'utf8'));
+    nodeRaumkernelVersion = rkPackage.version;
+} catch {
+    console.warn('Could not read node-raumkernel version');
+}
+
+console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion}`);
+
 console.log(`WebSocket server started on port ${PORT}`);
 
 // Broadcast state to all connected clients

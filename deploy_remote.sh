@@ -19,6 +19,10 @@ USER=$SSH_USER
 ADDON_PATH=$REMOTE_ADDON_PATH
 INTEGRATION_PATH=$REMOTE_INTEGRATION_PATH
 
+echo "Syncing addon version..."
+./ha-raumkernel-addon/sync-version.sh
+
+echo ""
 echo "Deploying to $USER@$HOST..."
 echo "Addon Path: $ADDON_PATH"
 echo "Integration Path: $INTEGRATION_PATH"
