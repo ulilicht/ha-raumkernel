@@ -119,6 +119,10 @@ wss.on('connection', (ws) => {
                         await rkHelper.play(payload.roomUdn);
                     }
                     break;
+
+                case 'seek':
+                    await rkHelper.seek(payload.roomUdn, payload.value);
+                    break;
                     
                 case 'pause':
                     await rkHelper.setPause(payload.roomUdn, true);

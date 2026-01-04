@@ -117,6 +117,28 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
                     self.async_write_ha_state()
                     break
 
+    def _parse_time_to_seconds(self, time_value: str | int | None) -> int | None:
+        """Parse time value to seconds. Handles HH:MM:SS, MM:SS, or int."""
+        if time_value is None or time_value == 0 or time_value == "":
+            return None
+
+        if isinstance(time_value, int):
+            return time_value
+
+        if isinstance(time_value, str):
+            try:
+                parts = time_value.split(":")
+                if len(parts) == 3:
+                    hours, minutes, seconds = map(int, parts)
+                    return hours * 3600 + minutes * 60 + seconds
+                if len(parts) == 2:
+                    minutes, seconds = map(int, parts)
+                    return minutes * 60 + seconds
+            except (ValueError, AttributeError):
+                pass
+
+        return None
+
     def update_state(self, room_data: dict[str, Any]) -> None:
         """Update state from data."""
         self._attr_available = True
@@ -130,10 +152,9 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         if "STANDBY" in power_state:
             self._attr_state = MediaPlayerState.IDLE
-        elif now_playing.get("isPlaying"):
+        elif now_playing.get("isPlaying") or now_playing.get("isLoading"):
+            # Treat TRANSITIONING (isLoading) as PLAYING to avoid UI flicker
             self._attr_state = MediaPlayerState.PLAYING
-        elif now_playing.get("isLoading"):
-            self._attr_state = MediaPlayerState.BUFFERING
         else:
             self._attr_state = MediaPlayerState.PAUSED
 
@@ -143,6 +164,20 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_title = now_playing.get("track")
         self._attr_media_artist = now_playing.get("artist")
         self._attr_media_image_url = now_playing.get("image")
+
+        # Parse duration and position for seek functionality
+        # Format from add-on is "HH:MM:SS" or "0:MM:SS" or seconds as int
+        duration_raw = now_playing.get("duration", 0)
+        position_raw = now_playing.get("position", 0)
+
+        self._attr_media_duration = self._parse_time_to_seconds(duration_raw)
+        self._attr_media_position = self._parse_time_to_seconds(position_raw)
+
+        # Update position timestamp so HA can interpolate position during playback
+        if now_playing.get("isPlaying"):
+            from homeassistant.util import dt as dt_util
+
+            self._attr_media_position_updated_at = dt_util.utcnow()
 
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
@@ -160,6 +195,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.BROWSE_MEDIA
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.TURN_ON
+            | MediaPlayerEntityFeature.SEEK
         )
 
         if now_playing.get("canPlayNext"):
@@ -234,6 +270,12 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         """Stop."""
         _LOGGER.debug("Calling async_media_stop for %s", self._udn)
         await self._client.stop(self._udn)
+
+    async def async_media_seek(self, position: float) -> None:
+        """Seek to position."""
+        _LOGGER.debug("Calling async_media_seek for %s to %s", self._udn, position)
+        await self._client.seek(self._udn, position)
+        # Add-on handles position updates for all zone members and broadcasts state
 
     async def async_turn_off(self) -> None:
         """Turn off the device."""
