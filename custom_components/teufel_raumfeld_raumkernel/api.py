@@ -146,6 +146,24 @@ class RaumfeldApiClient:
         """Stop."""
         await self.send_command("stop", {"roomUdn": room_udn})
 
+    async def seek(self, room_udn: str, position: float) -> None:
+        """Seek to position in seconds."""
+        # Add-on expects seconds, or we might need HH:MM:SS depending on Raumkernel
+        # Raumkernel .seek() takes target string.
+        # But usually in UPnP libraries for Node, seek() handles seconds or HH:MM:SS.
+        # Let's pass the float/int second value and let the add-on handle format.
+        # RaumkernelHelper.js calls renderer.seek(value).
+        import datetime
+
+        # Convert seconds to HH:MM:SS string which is safer for UPnP
+        try:
+            position_int = int(position)
+            target = str(datetime.timedelta(seconds=position_int))
+        except Exception:
+            target = str(position)
+
+        await self.send_command("seek", {"roomUdn": room_udn, "value": target})
+
     async def next(self, room_udn: str) -> None:
         """Next track."""
         await self.send_command("next", {"roomUdn": room_udn})

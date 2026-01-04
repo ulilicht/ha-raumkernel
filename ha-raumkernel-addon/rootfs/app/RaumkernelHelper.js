@@ -567,12 +567,32 @@ class RaumkernelHelper {
             isMuted: state.Mute === 1,
             volume: parseInt(state.Volume) || 0,
             canPlayPause,
-            canPlayNext: !isLoading && canPlayNext,
-            canPlayPrev: !isLoading && canPlayPrev,
+            canPlayNext,
+            canPlayPrev,
             duration: state.CurrentTrackDuration || 0,
-            position: state.RelativeTimePosition || 0,
+            position: this._getPositionForRoom(room, state.RelativeTimePosition || 0),
             powerState
         };
+    }
+
+    /**
+     * Gets the position for a room, using seek position if recently seeked
+     * @param {RoomInfo} room 
+     * @param {string|number} defaultPosition 
+     * @returns {string|number}
+     */
+    _getPositionForRoom(room, defaultPosition) {
+        if (!room) return defaultPosition;
+        
+        // If we seeked recently (within 5 seconds), use the seek position
+        const seekTime = room._lastSeekTime;
+        const seekPos = room._lastSeekPosition;
+        
+        if (seekTime && seekPos && (Date.now() - seekTime) < 5000) {
+            return seekPos;
+        }
+        
+        return defaultPosition;
     }
 
     _isContainerMedia(classString) {
@@ -617,6 +637,43 @@ class RaumkernelHelper {
     // ========================================================================
     // PLAYBACK COMMANDS
     // ========================================================================
+
+    async seek(roomIdentifier, value) {
+        const room = this.findRoom(roomIdentifier);
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        // Perform the seek
+        await renderer.seek('ABS_TIME', value);
+
+        // Wait briefly for the seek to take effect
+        await this._delay(300);
+
+        // Poll the new position and update state for all rooms in the zone
+        try {
+            const positionInfo = await renderer.getPositionInfo();
+            if (positionInfo) {
+                const newPosition = positionInfo.RelTime || positionInfo.RelativeTime || value;
+                
+                // Update position for all rooms in this zone
+                const zoneUdn = room.zoneUdn;
+                for (const r of this._rooms.values()) {
+                    if (r.zoneUdn === zoneUdn || r.roomUdn === room.roomUdn) {
+                        // Force position update in next broadcast
+                        r._lastSeekPosition = newPosition;
+                        r._lastSeekTime = Date.now();
+                    }
+                }
+                
+                // Broadcast updated state immediately
+                this._broadcastRoomStates();
+            }
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.COMMAND} Failed to get position after seek: ${err.message}`);
+            // Still broadcast to update clients
+            this._broadcastRoomStates();
+        }
+    }
 
     async play(roomIdentifier) {
         const room = this.findRoom(roomIdentifier);
