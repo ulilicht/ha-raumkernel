@@ -561,7 +561,9 @@ class RaumkernelHelper {
         return {
             artist: metadata.artist,
             track: metadata.track,
+            album: metadata.album,
             image: metadata.image?.replace('http://', 'https://') ?? '',
+            classString: metadata.classString,
             isPlaying,
             isLoading,
             isMuted: state.Mute === 1,

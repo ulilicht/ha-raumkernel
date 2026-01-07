@@ -83,6 +83,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_name = room_data.get("name")
         self._attr_unique_id = self._udn
         self._attr_icon = "mdi:speaker-multiple"
+        self._upnp_class = ""
         self.update_state(room_data)
 
     @property
@@ -163,7 +164,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         self._attr_media_title = now_playing.get("track")
         self._attr_media_artist = now_playing.get("artist")
+        self._attr_media_album_name = now_playing.get("album")
         self._attr_media_image_url = now_playing.get("image")
+
+        # Store UPnP class for media_content_type property
+        self._upnp_class = now_playing.get("classString", "")
 
         # Parse duration and position for seek functionality
         # Format from add-on is "HH:MM:SS" or "0:MM:SS" or seconds as int
@@ -209,6 +214,48 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_supported_features = features
 
     @property
+    def media_content_type(self) -> str | None:
+        """Return the content type of currently playing media."""
+        upnp_class = (self._upnp_class or "").lower()
+
+        if not upnp_class:
+            return None
+
+        # Music tracks
+        if "musictrack" in upnp_class:
+            return MediaType.MUSIC
+
+        # Radio/broadcasts (TuneIn, Line-In, etc.)
+        if "audiobroadcast" in upnp_class:
+            return MediaType.CHANNEL
+
+        # Albums
+        if "musicalbum" in upnp_class or "albumcontainer" in upnp_class:
+            return MediaType.ALBUM
+
+        # Artists/Composers
+        if "musicartist" in upnp_class or "musiccomposer" in upnp_class:
+            return MediaType.ARTIST
+
+        # Playlists and queues
+        if "playlistcontainer" in upnp_class or "favoritescontainer" in upnp_class:
+            return MediaType.PLAYLIST
+
+        # Genres
+        if "musicgenre" in upnp_class:
+            return MediaType.GENRE
+
+        # Folders
+        if "storagefolder" in upnp_class or upnp_class == "object.container":
+            return MediaType.APP
+
+        # Default for audio items
+        if "audioitem" in upnp_class:
+            return MediaType.MUSIC
+
+        return None
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
@@ -230,8 +277,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # Get all media_player entities
         all_states = self.hass.states.async_all("media_player")
 
-        _LOGGER.warning(
-            "[DEBUG group_members] Entity %s: zone_members=%s, checking %d states",
+        _LOGGER.debug(
+            "[group_members] Entity %s: zone_members=%s, checking %d states",
             self.entity_id,
             self._zone_members,
             len(all_states),
@@ -240,8 +287,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         for state in all_states:
             room_udn = state.attributes.get("room_udn")
             if room_udn:
-                _LOGGER.warning(
-                    "[DEBUG group_members] Checking %s: room_udn=%s, in_members=%s",
+                _LOGGER.debug(
+                    "[group_members] Checking %s: room_udn=%s, in_members=%s",
                     state.entity_id,
                     room_udn,
                     room_udn in self._zone_members,
@@ -249,8 +296,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             if room_udn in self._zone_members:
                 members.append(state.entity_id)
 
-        _LOGGER.warning(
-            "[DEBUG group_members] Entity %s: resolved members=%s",
+        _LOGGER.debug(
+            "[group_members] Entity %s: resolved members=%s",
             self.entity_id,
             members,
         )
