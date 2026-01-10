@@ -230,21 +230,7 @@ wss.on('connection', (ws) => {
                     await rkHelper.leaveGroup(payload.roomUdn);
                     break;
 
-                case 'removeIntegration':
-                    // Remove integration files from custom_components
-                    try {
-                        const removed = await integrationManager.removeIntegration();
-                        if (removed) {
-                            await integrationManager.notifyRestartRequired('removed');
-                            ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: true } }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: false, reason: 'Integration not found' } }));
-                        }
-                    } catch (err) {
-                        console.error('Failed to remove integration:', err);
-                        ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: false, reason: err.message } }));
-                    }
-                    break;
+
 
                 default:
                     console.warn('Unknown command:', command);

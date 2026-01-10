@@ -127,21 +127,7 @@ export default class IntegrationManager {
         return true;
     }
 
-    /**
-     * Remove the integration from custom_components
-     * Returns true if removed, false if not found
-     */
-    removeIntegration() {
-        if (!this.checkIntegrationInstalled()) {
-            console.log('IntegrationManager: Integration not installed, nothing to remove');
-            return false;
-        }
 
-        console.log('IntegrationManager: Removing integration from custom_components');
-        fs.rmSync(this.targetPath, { recursive: true, force: true });
-        console.log('IntegrationManager: Integration removed successfully');
-        return true;
-    }
 
     /**
      * Create a persistent notification in Home Assistant

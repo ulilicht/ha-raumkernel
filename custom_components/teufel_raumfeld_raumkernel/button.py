@@ -25,9 +25,6 @@ async def async_setup_entry(
     """Set up the Raumfeld button."""
     client: RaumfeldApiClient = hass.data[DOMAIN][entry.entry_id]
 
-    # Add global buttons (not per-room)
-    async_add_entities([RemoveIntegrationButton(client, entry)])
-
     known_udns = set()
 
     @callback
@@ -83,28 +80,3 @@ class RaumfeldRebootButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self._client.reboot(self._room_udn)
-
-
-class RemoveIntegrationButton(ButtonEntity):
-    """Button to remove the integration files (for addon uninstall cleanup)."""
-
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:delete"
-    _attr_has_entity_name = True
-
-    def __init__(self, client: RaumfeldApiClient, entry: ConfigEntry) -> None:
-        """Initialize the button."""
-        self._client = client
-        self._entry = entry
-        self._attr_name = "Remove Integration Files (Addon must still be installed)"
-        self._attr_unique_id = f"{DOMAIN}_remove_integration"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, "addon")},
-            "name": "Teufel Raumfeld Addon",
-            "manufacturer": "Teufel",
-            "model": "Raumkernel Addon",
-        }
-
-    async def async_press(self) -> None:
-        """Handle the button press - request addon to remove integration files."""
-        await self._client.remove_integration()
