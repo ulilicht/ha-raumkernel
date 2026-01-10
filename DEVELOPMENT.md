@@ -19,7 +19,7 @@ The development workflow is designed to sync local changes to a remote Home Assi
 
 ## Core Development Commands
 
-### 🚀 Deploying Changes locally
+### 🚀 Deploying Changes to a development intance of Home Assistant
 
 The primary command for development is `./deploy_remote.sh`. It performs the following steps:
 
