@@ -17,7 +17,9 @@ RUN \
 COPY rootfs /
 
 # Copy integration for auto-install
-COPY integration /integration
+# NOTE: integration-build-output is a copy of custom_components/teufel_raumfeld_raumkernel
+# Do not edit files in integration-build-output directly - edit the source in custom_components/
+COPY integration-build-output /integration
 
 WORKDIR /app
 
