@@ -1,4 +1,10 @@
 configuration:
-  message:
-    name: Message
-    description: The message that will be printed to the log when starting this example add-on.
+  LOG_LEVEL:
+    name: Log Level
+    description: "Connect to Raumfeld Host. 0=Error, 1=Warn, 2=Info (default), 3=Debug, 4=Verbose, 5=Silly"
+  PORT:
+    name: Port
+    description: "Port for the WebSocket server (default: 3000)"
+  ENABLE_AUTO_INSTALL:
+    name: Auto-Install Integration
+    description: "If enabled, the Raumkernel Addon installs and updates the Raumfeld Integration automatically. Disable this option if you want to install the Raumfeld Integration from another source (e.g. HACS)."

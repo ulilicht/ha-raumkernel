@@ -1,7 +1,12 @@
 import { WebSocketServer } from 'ws';
 import RaumkernelHelper from './RaumkernelHelper.js';
+import IntegrationManager from './IntegrationManager.js';
 
 import fs from 'fs';
+
+// Run integration install/update check on startup
+const integrationManager = new IntegrationManager();
+await integrationManager.ensureIntegrationInstalled();
 
 let PORT = 3000;
 
@@ -54,7 +59,10 @@ try {
     console.warn('Could not read node-raumkernel version');
 }
 
-console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion}`);
+// Get installed integration version
+const installedIntegrationVersion = integrationManager.getInstalledVersion() || 'not installed';
+
+console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion} integration=${installedIntegrationVersion}`);
 
 console.log(`WebSocket server started on port ${PORT}`);
 
@@ -222,6 +230,21 @@ wss.on('connection', (ws) => {
                     await rkHelper.leaveGroup(payload.roomUdn);
                     break;
 
+                case 'removeIntegration':
+                    // Remove integration files from custom_components
+                    try {
+                        const removed = await integrationManager.removeIntegration();
+                        if (removed) {
+                            await integrationManager.notifyRestartRequired('removed');
+                            ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: true } }));
+                        } else {
+                            ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: false, reason: 'Integration not found' } }));
+                        }
+                    } catch (err) {
+                        console.error('Failed to remove integration:', err);
+                        ws.send(JSON.stringify({ type: 'integrationRemoved', payload: { success: false, reason: err.message } }));
+                    }
+                    break;
 
                 default:
                     console.warn('Unknown command:', command);

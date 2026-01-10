@@ -239,3 +239,7 @@ class RaumfeldApiClient:
     async def leave_group(self, room_udn: str) -> None:
         """Leave a zone (become standalone)."""
         await self.send_command("leaveGroup", {"roomUdn": room_udn})
+
+    async def remove_integration(self) -> None:
+        """Remove integration files from custom_components."""
+        await self.send_command("removeIntegration", {})
