@@ -17,7 +17,9 @@ options:
   LOG_LEVEL: 2
   PORT: 3000
   ENABLE_AUTO_INSTALL: true
+  DEVELOPER_MODE: false
 schema:
   LOG_LEVEL: int
   PORT: int
   ENABLE_AUTO_INSTALL: bool
+  DEVELOPER_MODE: bool

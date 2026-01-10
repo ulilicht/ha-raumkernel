@@ -99,7 +99,9 @@ export default class IntegrationManager {
         const installedVersion = this.getInstalledVersion();
         const isInstalled = this.checkIntegrationInstalled();
 
-        if (isInstalled && installedVersion) {
+        if (this.options.DEVELOPER_MODE) {
+            console.log('IntegrationManager: Developer Mode enabled, forcing integration install');
+        } else if (isInstalled && installedVersion) {
             const comparison = this.compareVersions(installedVersion, bundledVersion);
             if (comparison >= 0) {
                 console.log(`IntegrationManager: Integration already up to date (v${installedVersion})`);
