@@ -3,7 +3,7 @@
 This project provides a Home Assistant integration for Teufel Raumfeld devices, based on `node-raumkernel`.
 
 - ⚠️ **Pre-release:** _This project is currently in a pre-release state. Use at your own risk._
-- 🤖 **AI Generated:** The Project is primarily AI generated, with some manual adjustments._ 
+- 🤖 **AI Generated:** \_This project is primarily AI generated, with some manual adjustments.
 
 It consists of:
 
@@ -12,13 +12,12 @@ It consists of:
 
 ## 🎵 Key Features
 
-- **All key features of Raumfeld integrated** Playback information, Play, Pause, Prev/Back, Volume, Turn on /off 
-- **Spotify Support** Stable support if Raumfeld devices are in Spotify single room mode. 
-- **Room and Zone Handling** Supports multi-room. Allows Group/Ungroup Raumfeld devices. 
-- **Music Assistant** Integrates well with Music Assistant
-- **Fast reaction times and efficient device usage** Works e.g. well if you send multiple volume increase commands after each other (e.g. through a Zigbee remote) 
-- **Reboot Raumfeld Devices** Button for reboot Raumfeld devices if that becomes necessary. The addon itself only has a small footprint on the speakers. 
-
+- **All key features of Raumfeld integrated:** Playback information, Play, Pause, Prev/Back, Volume, Turn on/off
+- **Spotify Support:** Stable support if Raumfeld devices are in Spotify single room mode.
+- **Room and Zone Handling:** Supports multi-room. Allows grouping/ungrouping of Raumfeld devices.
+- **Music Assistant:** Integrates well with Music Assistant.
+- **Fast reaction times and efficient device usage:** Works well, for example, if you send multiple volume increase commands in quick succession (e.g., through a Zigbee remote).
+- **Reboot Raumfeld Devices:** Dedicated button to reboot Raumfeld devices if necessary. The addon itself has a minimal footprint on the speakers.
 
 ## Installation
 
@@ -55,7 +54,7 @@ It consists of:
 4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 5. Configure the host (local IP of your HA instance) and port (`3000`).
 
-⚠️ If you want to switch from HACS to Option A, automatic install, you need to completely remove the `custom_components/teufel_raumfeld_raumkernel` folder created by HACS before. 
+⚠️ If you want to switch from HACS to Option A (automatic install), you need to completely remove the `custom_components/teufel_raumfeld_raumkernel` folder previously created by HACS.
 
 ## Key Concepts: Rooms vs Zones
 
@@ -74,7 +73,7 @@ Understanding how Raumfeld organizes devices is key to using this integration:
 
 ## Development
 
-See [DEVELOPMENT.md](../DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.
+See [DEVELOPMENT.md](DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.
 
 ## License
 
