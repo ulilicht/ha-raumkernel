@@ -8,3 +8,6 @@ configuration:
   ENABLE_AUTO_INSTALL:
     name: Auto-Install Integration
     description: "If enabled, the Raumkernel Addon installs and updates the Raumfeld Integration automatically. Disable this option if you want to install the Raumfeld Integration from another source (e.g. HACS)."
+  DEVELOPER_MODE:
+    name: Developer Mode
+    description: "Copies the integration code on every restart of the Raumkernel Addon. Helpful when developing."

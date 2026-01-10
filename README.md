@@ -13,7 +13,7 @@ It consists of:
 
 ## Installation
 
-### 1. Install the Add-on
+### Option A: Bundled Installation of Add-on and Integration
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
 2. Add the repository:
@@ -21,12 +21,27 @@ It consists of:
    [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
 3. Install **Teufel Raumfeld (Raumkernel Addon)**.
-4. **Start** the Add-on. The default WebSocket port is `3000`.
+4. Start the Add-on. It will automatically install the integration on first startup.
+5. Restart Home Assistant.
+6. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 
-### 2. Install the Integration
+### Option B: Separate Installation of Add-on and Integration
+
+#### 1. Install the Add-on
+
+1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
+2. Add the repository:
+
+   [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+
+3. Install **Teufel Raumfeld (Raumkernel Addon)**.
+4. Check the configuration: Disable automatic installation of the integration.
+5. **Start** the Add-on. The default WebSocket port is `3000`.
+
+#### 2. Install the Integration through HACS
 
 1. Ensure the Add-on is running.
-2. If using HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
+2. In HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
 4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 5. Configure the host (local IP of your HA instance) and port (`3000`).
@@ -48,10 +63,7 @@ Understanding how Raumfeld organizes devices is key to using this integration:
 
 ## Development
 
-## Project Structure
-
-- `ha-raumkernel-addon/`: Node.js Add-on source.
-- `custom_components/teufel_raumfeld_raumkernel/`: Python Integration source.
+See [DEVELOPMENT.md](../DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.
 
 ## License
 
