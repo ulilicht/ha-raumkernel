@@ -17,3 +17,12 @@ repos:
           - eslint@9.17.0
           - globals@15.14.0
           - "@eslint/js@9.17.0"
+
+  - repo: local
+    hooks:
+      - id: prepare-build
+        name: Prepare addon build (sync versions + bundle integration)
+        entry: ./ha-raumkernel-addon/prepare-build.sh
+        language: script
+        pass_filenames: false
+        always_run: true

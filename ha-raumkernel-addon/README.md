@@ -1,19 +1,31 @@
 # Teufel Raumfeld (Raumkernel Addon)
 
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-A Home Assistant Add-on that provides a bridge to Teufel Raumfeld devices using the `node-raumkernel` library.
-
-## Description
-
-This add-on allows Home Assistant to communicate with Teufel Raumfeld multi-room audio systems. It wraps the `node-raumkernel` library and exposes a WebSocket API that the corresponding Home Assistant integration uses to control playback, volume, and grouping.
+A Home Assistant Add-on that provides a bridge to Teufel Raumfeld devices using the `node-raumkernel` library. The addon comes bundled with the Raumfeld integration and will install it automatically on startup. (can be disabled in the settings)
 
 ## Features
 
 - **Stable Room Entities**: Provides consistent identifiers for your Raumfeld rooms.
 - **Unified Control**: Seamlessly handles the transition between standalone playback and zone-based grouping.
 - **WebSocket API**: High-performance communication between the add-on and the integration.
+- **Auto-Install Integration**: Automatically installs and updates the HA integration on startup.
 
-[aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
-[amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
+## Installation
+
+On first startup the addon will install the Raumfeld integration automatically. If the integration is already installed, the addon will update it to the latest version.
+
+> [!IMPORTANT] > **You need to restart Home Assistant** before you can see the integration in the Home Assistant UI.
+
+## Configuration
+
+| Option                | Default | Description                                |
+| --------------------- | ------- | ------------------------------------------ |
+| `LOG_LEVEL`           | `2`     | Logging verbosity (0-4)                    |
+| `PORT`                | `3000`  | WebSocket server port                      |
+| `ENABLE_AUTO_INSTALL` | `true`  | Auto-install/update integration on startup |
+| `DEVELOPER_MODE`      | `false` | Always copy integration files on startup   |
+
+---
+
+## Development
+
+See [DEVELOPMENT.md](../DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.

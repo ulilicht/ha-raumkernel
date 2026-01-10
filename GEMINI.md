@@ -9,9 +9,9 @@ This project controls Teufel Raumfeld devices via Home Assistant. It consists of
 
 ## Development Workflow
 
-### 1. Deployment causes Remote Changes
+### Deployment
 
-**ALWAYS** deploy changes after editing code to verify them.
+If its helpful, you can attempt to deploy changes to remote and ask for feedback.
 
 **Command:**
 
@@ -20,6 +20,8 @@ This project controls Teufel Raumfeld devices via Home Assistant. It consists of
 ```
 
 _This script syncs files, automatically rebuilds/restarts the Add-on, and determines if a full Core restart is needed._
+
+You can also ask the user for ssh access to the remote host to check the logs.
 
 ### 2. File Structure
 
@@ -68,8 +70,5 @@ This integration uses a **Room-Based Grouping** strategy.
 
 ## Documentation
 
-Documentation for node-raumkernel can be found in this folder: .prompt/node-raumkernel-wiki, especially:
-
-- .prompt/node-raumkernel-wiki/Data-&-Methods.md
-- .prompt/node-raumkernel-wiki/Events.md
-- .prompt/node-raumkernel-wiki/Raumfeld-Concepts.md
+Documentation for node-raumkernel can be found in the git repository: github:ulilicht/node-raumkernel
+If you struggle with interaction with node-raumkernel, download the repository and check the code there.

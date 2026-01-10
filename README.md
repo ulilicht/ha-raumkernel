@@ -2,18 +2,26 @@
 
 This project provides a Home Assistant integration for Teufel Raumfeld devices, based on `node-raumkernel`.
 
-⚠️ **Note:** This project is currently in a **pre-release** state. Use at your own risk.
-
-🤖 _The Project is primarily AI generated, with some manual adjustments. Use with caution._ ⚠️
+- ⚠️ **Pre-release:** _This project is currently in a pre-release state. Use at your own risk._
+- 🤖 **AI Generated:** \_This project is primarily AI generated, with some manual adjustments.
 
 It consists of:
 
 - A **Home Assistant Add-on** wrapping node-raumkernel and exposing a WebSocket API.
 - A **Home Assistant Integration** (Custom Component) that communicates with the Add-on.
 
+## 🎵 Key Features
+
+- **All key features of Raumfeld integrated:** Playback information, Play, Pause, Prev/Back, Volume, Turn on/off
+- **Spotify Support:** Stable support if Raumfeld devices are in Spotify single room mode.
+- **Room and Zone Handling:** Supports multi-room. Allows grouping/ungrouping of Raumfeld devices.
+- **Music Assistant:** Integrates well with Music Assistant.
+- **Fast reaction times and efficient device usage:** Works well, for example, if you send multiple volume increase commands in quick succession (e.g., through a Zigbee remote).
+- **Reboot Raumfeld Devices:** Dedicated button to reboot Raumfeld devices if necessary. The addon itself has a minimal footprint on the speakers.
+
 ## Installation
 
-### 1. Install the Add-on
+### Option A: Bundled Installation of Add-on and Integration
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
 2. Add the repository:
@@ -21,15 +29,32 @@ It consists of:
    [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
 3. Install **Teufel Raumfeld (Raumkernel Addon)**.
-4. **Start** the Add-on. The default WebSocket port is `3000`.
+4. Start the Add-on. It will automatically install the integration on first startup.
+5. Restart Home Assistant.
+6. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 
-### 2. Install the Integration
+### Option B: Separate Installation of Add-on and Integration
+
+#### 1. Install the Add-on
+
+1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
+2. Add the repository:
+
+   [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+
+3. Install **Teufel Raumfeld (Raumkernel Addon)**.
+4. Check the configuration: Disable automatic installation of the integration.
+5. **Start** the Add-on. The default WebSocket port is `3000`.
+
+#### 2. Install the Integration through HACS
 
 1. Ensure the Add-on is running.
-2. If using HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
+2. In HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
 4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
 5. Configure the host (local IP of your HA instance) and port (`3000`).
+
+⚠️ If you want to switch from HACS to Option A (automatic install), you need to completely remove the `custom_components/teufel_raumfeld_raumkernel` folder previously created by HACS.
 
 ## Key Concepts: Rooms vs Zones
 
@@ -48,10 +73,7 @@ Understanding how Raumfeld organizes devices is key to using this integration:
 
 ## Development
 
-## Project Structure
-
-- `ha-raumkernel-addon/`: Node.js Add-on source.
-- `custom_components/teufel_raumfeld_raumkernel/`: Python Integration source.
+See [DEVELOPMENT.md](DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.
 
 ## License
 

@@ -1,14 +1,17 @@
 {
   "domain": "teufel_raumfeld_raumkernel",
   "name": "Teufel Raumfeld (Raumkernel Addon)",
-  "codeowners": ["@ulilicht"],
+  "codeowners": [
+    "@ulilicht"
+  ],
   "config_flow": true,
-  "dependencies": ["hassio"],
+  "dependencies": [
+    "hassio"
+  ],
   "documentation": "https://github.com/ulilicht/ha-raumkernel",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "integration_type": "hub",
   "issue_tracker": "https://github.com/ulilicht/ha-raumkernel/issues",
   "requirements": [],
-  "version": "1.2.8"
+  "version": "1.2.9"
 }
