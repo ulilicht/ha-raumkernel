@@ -24,11 +24,10 @@ It consists of:
 ### Option A: Bundled Installation of Add-on and Integration
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
-2. Add the repository:
+2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Teufel Raumfeld (Raumkernel Addon)**: 
 
-   [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+ [![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
-3. Install **Teufel Raumfeld (Raumkernel Addon)**.
 4. Start the Add-on. It will automatically install the integration on first startup.
 5. Restart Home Assistant.
 6. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
@@ -38,13 +37,12 @@ It consists of:
 #### 1. Install the Add-on
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
-2. Add the repository:
+2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Teufel Raumfeld (Raumkernel Addon)**: 
 
-   [![add Add-on Repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+ [![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
-3. Install **Teufel Raumfeld (Raumkernel Addon)**.
-4. Check the configuration: Disable automatic installation of the integration.
-5. **Start** the Add-on. The default WebSocket port is `3000`.
+3. Check the configuration: Disable automatic installation of the integration.
+4. **Start** the Add-on. The default WebSocket port is `3000`.
 
 #### 2. Install the Integration through HACS
 
