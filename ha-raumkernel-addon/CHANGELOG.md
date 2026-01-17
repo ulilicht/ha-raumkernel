@@ -1,10 +1,17 @@
+## 1.2.10
+
+- Fixes a crash if homeassistant sends a "prev" command even if prev is not allowed
+- Fix issues with seek.
+
 ## 1.2.9
-- Automatic install of integration 
+
+- Automatic install of integration
 
 ## 1.2.7
-- Add Seek 
-- Improved Zone Handling 
-- Reboot Devices 
+
+- Add Seek
+- Improved Zone Handling
+- Reboot Devices
 
 ## 1.2.2
 
