@@ -9,7 +9,7 @@ echo "Syncing versions..."
 ./sync-version.sh
 
 echo "Preparing build: copying integration files..."
-rm -rf ./integration-build-output
-cp -r ../custom_components/teufel_raumfeld_raumkernel ./integration-build-output
+rm -rf ./teufel_raumfeld_raumkernel
+cp -r ../custom_components/teufel_raumfeld_raumkernel ./teufel_raumfeld_raumkernel
 
 echo "Done! Ready to build addon."
