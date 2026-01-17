@@ -37,11 +37,21 @@ echo ""
 
 # Deploy Add-on
 echo "📦 Syncing Add-on files..."
+set +e
 ADDON_RSYNC_OUTPUT=$(rsync -avz --delete --itemize-changes \
   --exclude 'node_modules' \
   --exclude '.git' \
   --exclude '.DS_Store' \
   ha-raumkernel-addon/ "$USER@$HOST:$ADDON_PATH" 2>&1)
+RSYNC_EXIT_CODE=$?
+set -e
+
+if [ $RSYNC_EXIT_CODE -ne 0 ]; then
+  echo "❌ Rsync failed with exit code $RSYNC_EXIT_CODE"
+  echo "Output:"
+  echo "$ADDON_RSYNC_OUTPUT"
+  exit $RSYNC_EXIT_CODE
+fi
 
 # Check if any files were transferred
 if echo "$ADDON_RSYNC_OUTPUT" | grep -qE '^[<>]f'; then

@@ -118,28 +118,6 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
                     self.async_write_ha_state()
                     break
 
-    def _parse_time_to_seconds(self, time_value: str | int | None) -> int | None:
-        """Parse time value to seconds. Handles HH:MM:SS, MM:SS, or int."""
-        if time_value is None or time_value == 0 or time_value == "":
-            return None
-
-        if isinstance(time_value, int):
-            return time_value
-
-        if isinstance(time_value, str):
-            try:
-                parts = time_value.split(":")
-                if len(parts) == 3:
-                    hours, minutes, seconds = map(int, parts)
-                    return hours * 3600 + minutes * 60 + seconds
-                if len(parts) == 2:
-                    minutes, seconds = map(int, parts)
-                    return minutes * 60 + seconds
-            except (ValueError, AttributeError):
-                pass
-
-        return None
-
     def update_state(self, room_data: dict[str, Any]) -> None:
         """Update state from data."""
         self._attr_available = True
@@ -171,12 +149,9 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._upnp_class = now_playing.get("classString", "")
 
         # Parse duration and position for seek functionality
-        # Format from add-on is "HH:MM:SS" or "0:MM:SS" or seconds as int
-        duration_raw = now_playing.get("duration", 0)
-        position_raw = now_playing.get("position", 0)
-
-        self._attr_media_duration = self._parse_time_to_seconds(duration_raw)
-        self._attr_media_position = self._parse_time_to_seconds(position_raw)
+        # Add-on provides seconds directly as integer
+        self._attr_media_duration = now_playing.get("durationSeconds", 0)
+        self._attr_media_position = now_playing.get("positionSeconds", 0)
 
         # Update position timestamp so HA can interpolate position during playback
         if now_playing.get("isPlaying"):

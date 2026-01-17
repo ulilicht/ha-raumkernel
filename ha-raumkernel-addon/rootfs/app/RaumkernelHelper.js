@@ -558,6 +558,25 @@ class RaumkernelHelper {
             powerState = state.PowerState || 'ACTIVE';
         }
 
+        // Parse time strings to seconds (helper)
+        const parseToSeconds = (timeVal) => {
+            if (typeof timeVal === 'number') return timeVal;
+            if (!timeVal) return 0;
+            try {
+                const parts = timeVal.split(':').map(Number);
+                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                return 0;
+            } catch {
+                return 0;
+            }
+        };
+
+        const durationSeconds = parseToSeconds(state.CurrentTrackDuration);
+        const positionSeconds = typeof state.RelativeTimePosition === 'number' 
+            ? state.RelativeTimePosition 
+            : parseToSeconds(state.RelativeTimePosition);
+
         return {
             artist: metadata.artist,
             track: metadata.track,
@@ -572,7 +591,9 @@ class RaumkernelHelper {
             canPlayNext,
             canPlayPrev,
             duration: state.CurrentTrackDuration || 0,
+            durationSeconds,
             position: this._getPositionForRoom(room, state.RelativeTimePosition || 0),
+            positionSeconds: this._getPositionForRoom(room, positionSeconds),
             powerState
         };
     }
@@ -580,8 +601,8 @@ class RaumkernelHelper {
     /**
      * Gets the position for a room, using seek position if recently seeked
      * @param {RoomInfo} room 
-     * @param {string|number} defaultPosition 
-     * @returns {string|number}
+     * @param {number} defaultPosition - Position in seconds
+     * @returns {number} Position in seconds
      */
     _getPositionForRoom(room, defaultPosition) {
         if (!room) return defaultPosition;
@@ -590,7 +611,7 @@ class RaumkernelHelper {
         const seekTime = room._lastSeekTime;
         const seekPos = room._lastSeekPosition;
         
-        if (seekTime && seekPos && (Date.now() - seekTime) < 5000) {
+        if (seekTime && typeof seekPos === 'number' && (Date.now() - seekTime) < 5000) {
             return seekPos;
         }
         
@@ -645,8 +666,18 @@ class RaumkernelHelper {
         const renderer = this._getRendererForRoom(room);
         if (!renderer) return;
 
+        // Format value to HH:MM:SS if it's a number (seconds)
+        let targetValue = value;
+        if (typeof value === 'number') {
+            const h = Math.floor(value / 3600);
+            const m = Math.floor((value % 3600) / 60);
+            const s = Math.floor(value % 60);
+            targetValue = `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
         // Perform the seek
-        await renderer.seek('ABS_TIME', value);
+        console.log(`${LOG_PREFIX.COMMAND} Seeking ${room.name} to ${targetValue} (raw: ${value})`);
+        await renderer.seek('ABS_TIME', targetValue);
 
         // Wait briefly for the seek to take effect
         await this._delay(300);
@@ -655,14 +686,13 @@ class RaumkernelHelper {
         try {
             const positionInfo = await renderer.getPositionInfo();
             if (positionInfo) {
-                const newPosition = positionInfo.RelTime || positionInfo.RelativeTime || value;
-                
                 // Update position for all rooms in this zone
                 const zoneUdn = room.zoneUdn;
                 for (const r of this._rooms.values()) {
                     if (r.zoneUdn === zoneUdn || r.roomUdn === room.roomUdn) {
                         // Force position update in next broadcast
-                        r._lastSeekPosition = newPosition;
+                        // Store as seconds for consistency with positionSeconds
+                        r._lastSeekPosition = typeof value === 'number' ? value : 0;
                         r._lastSeekTime = Date.now();
                     }
                 }
@@ -741,9 +771,18 @@ class RaumkernelHelper {
         const room = this.findRoom(roomIdentifier);
         const renderer = this._getRendererForRoom(room);
         if (renderer) {
-            // Call prev twice for proper track rewind behavior
-            renderer.prev();
-            return renderer.prev();
+            try {
+                // Call prev twice for proper track rewind behavior
+                await renderer.prev();
+                await renderer.prev();
+            } catch (err) {
+                // 701 = Transition not available
+                if (err.errorCode === '701' || err.message?.includes('701')) {
+                    console.warn(`${LOG_PREFIX.COMMAND} Prev (701) ignored for ${room?.name}`);
+                    return;
+                }
+                throw err;
+            }
         }
     }
 
