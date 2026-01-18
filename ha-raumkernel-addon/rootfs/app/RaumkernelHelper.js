@@ -489,6 +489,7 @@ class RaumkernelHelper {
         return {
             artist: '',
             track: '',
+            uri: '',
             image: '',
             isPlaying: false,
             isLoading: false,
@@ -581,6 +582,7 @@ class RaumkernelHelper {
             artist: metadata.artist,
             track: metadata.track,
             album: metadata.album,
+            uri: metadata.uri || state.AVTransportURI || '',
             image: metadata.image?.replace('http://', 'https://') ?? '',
             classString: metadata.classString,
             isPlaying,
@@ -636,7 +638,7 @@ class RaumkernelHelper {
      * @returns {MediaMetadata}
      */
     _parseMetadata(xml) {
-        const result = { track: '', artist: '', album: '', image: '', classString: '' };
+        const result = { track: '', artist: '', album: '', image: '', uri: '', classString: '' };
         if (!xml) return result;
 
         try {
@@ -650,6 +652,7 @@ class RaumkernelHelper {
             result.artist = getText('upnp:artist');
             result.album = getText('upnp:album');
             result.image = getText('upnp:albumArtURI');
+            result.uri = getText('res');
         } catch (err) {
             console.warn(`${LOG_PREFIX.MEDIA} Metadata parse error: ${err.message}`);
         }

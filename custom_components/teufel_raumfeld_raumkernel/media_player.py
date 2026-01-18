@@ -84,6 +84,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_unique_id = self._udn
         self._attr_icon = "mdi:speaker-multiple"
         self._upnp_class = ""
+        self._attr_media_content_id = None
         self.update_state(room_data)
 
     @property
@@ -144,6 +145,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_artist = now_playing.get("artist")
         self._attr_media_album_name = now_playing.get("album")
         self._attr_media_image_url = now_playing.get("image")
+        self._attr_media_content_id = now_playing.get("uri")
 
         # Store UPnP class for media_content_type property
         self._upnp_class = now_playing.get("classString", "")

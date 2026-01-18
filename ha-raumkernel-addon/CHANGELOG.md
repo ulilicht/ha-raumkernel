@@ -1,3 +1,7 @@
+## 1.2.11
+
+- Add support for media_content_id. It is now possible to see which media is currently playing.
+
 ## 1.2.10
 
 - Fixes a crash if homeassistant sends a "prev" command even if prev is not allowed
