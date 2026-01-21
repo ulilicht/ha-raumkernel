@@ -4,8 +4,12 @@
       "user": {
         "title": "Connect to Teufel Raumfeld (Raumkernel Addon)",
         "data": {
-          "host": "Host",
+          "host": "Addon host",
           "port": "Port"
+        },
+        "data_description": {
+          "host": "URL of the Raumkernel Addon. If installed on Homeassistant, localhost is the right setting",
+          "port": "Port which was configured for the Addon. Default is 3000."
         }
       }
     },
