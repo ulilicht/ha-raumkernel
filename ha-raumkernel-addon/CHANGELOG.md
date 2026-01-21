@@ -1,3 +1,7 @@
+## 1.2.12
+
+- Added a setting to manually set the Raumfeld host address if auto discovery fails.
+
 ## 1.2.11
 
 - Add support for media_content_id. It is now possible to see which media is currently playing.

@@ -34,6 +34,8 @@ try {
     if (fs.existsSync('/data/options.json')) {
         const options = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
         if (options.PORT) PORT = options.PORT;
+        if (options.RAUMFELD_HOST) process.env.RAUMFELD_HOST = options.RAUMFELD_HOST;
+        if (options.LOG_LEVEL !== undefined) process.env.LOG_LEVEL = options.LOG_LEVEL;
     }
 } catch {
     console.warn('Failed to read /data/options.json, using default port 3000');

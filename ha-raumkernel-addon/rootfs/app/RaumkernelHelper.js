@@ -103,6 +103,12 @@ class RaumkernelHelper {
     constructor() {
         /** @type {RaumkernelLib.Raumkernel} */
         this.raumkernel = new RaumkernelLib.Raumkernel();
+
+        // Configure manual host if set
+        if (process.env.RAUMFELD_HOST && process.env.RAUMFELD_HOST.trim() !== '') {
+            this.raumkernel.settings.raumfeldHost = process.env.RAUMFELD_HOST.trim();
+            console.log(`[RK] [INFO] Using configured Raumfeld Host: ${this.raumkernel.settings.raumfeldHost}`);
+        }
         
         /** @type {Map<string, RoomInfo>} Room registry keyed by RENDERER UDN */
         this._rooms = new Map();
@@ -139,6 +145,10 @@ class RaumkernelHelper {
             console.log(`${LOG_PREFIX.REGISTRY} System ready: ${ready}`);
             this._state.isReady = ready;
             if (ready) {
+                // If we have a fixed host, we might want to log it
+                if (this.raumkernel.getSettings().raumfeldHost !== "0.0.0.0") {
+                     console.log(`${LOG_PREFIX.REGISTRY} Connected to fixed host: ${this.raumkernel.getSettings().raumfeldHost}`);
+                }
                 this._refreshRoomRegistry();
                 
                 // Process initial zone state
