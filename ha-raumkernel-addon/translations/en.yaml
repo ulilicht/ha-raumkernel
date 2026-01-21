@@ -1,13 +1,16 @@
 configuration:
-  LOG_LEVEL:
-    name: Log Level
-    description: "Connect to Raumfeld Host. 0=Error, 1=Warn, 2=Info (default), 3=Debug, 4=Verbose, 5=Silly"
   PORT:
-    name: Port
-    description: "Port for the WebSocket server (default: 3000)"
+    name: Addon Port
+    description: "Port the Addon uses for the WebSocket server (default: 3000). You need this setting in the Integration configuration."
+  RAUMFELD_HOST:
+    name: "Raumfeld host, e.g. 192.168.1.100 (Optional)"
+    description: "If left empty, Raumkernel automatically discovers the Raumfeld devices in the Network. If this fails, you can enter the IP of your Raumfeld host device visible in the Raumfeld App."
   ENABLE_AUTO_INSTALL:
     name: Auto-Install Integration
     description: "If enabled, the Raumkernel Addon installs and updates the Raumfeld Integration automatically. Disable this option if you want to install the Raumfeld Integration from another source (e.g. HACS)."
+  LOG_LEVEL:
+    name: Log Level
+    description: "0=Error, 1=Warn, 2=Info (default), 3=Debug, 4=Verbose, 5=Silly"
   DEVELOPER_MODE:
-    name: Developer Mode
-    description: "Copies the integration code on every restart of the Raumkernel Addon. Helpful when developing."
+    name: Development Mode
+    description: "Installs the integration code on every restart of the Raumkernel Addon. Helpful when developing."
