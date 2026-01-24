@@ -1,9 +1,9 @@
-# Home Assistant Raumfeld Add-on & Integration
+# Home Assistant Add-on & Integration for Teufel Raumfeld devices
 
 This project provides a Home Assistant integration for Teufel Raumfeld devices, based on `node-raumkernel`.
 
 - ⚠️ **Pre-release:** _This project is currently in a pre-release state. Use at your own risk._
-- 🤖 **AI Generated:** _This project is primarily AI generated, with some manual adjustments._
+- 🤖 **AI Assisted:** _This project is created using AI assistants, with some manual adjustments._
 
 It consists of:
 
@@ -42,7 +42,7 @@ It consists of:
  [![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
 3. Check the configuration: Disable automatic installation of the integration.
-4. **Start** the Add-on. The default WebSocket port is `3000`.
+4. **Start** the Add-on. It will be available unter your homeassistant IP on the configured port, e.g. http://homeassistant.local:3000
 
 #### 2. Install the Integration through HACS
 
@@ -50,7 +50,7 @@ It consists of:
 2. In HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
 4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
-5. Configure the host (local IP of your HA instance) and port (`3000`).
+5. Install the integration. On first start, you will be asked for the adress of your Addon - default is localhost:3000.
 
 ⚠️ If you want to switch from HACS to Option A (automatic install), you need to completely remove the `custom_components/teufel_raumfeld_raumkernel` folder previously created by HACS.
 
