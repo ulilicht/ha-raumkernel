@@ -1,5 +1,5 @@
 {
-  "name": "Teufel Raumfeld (Raumkernel Addon)",
+  "name": "Raumkernel: Integration for Teufel Raumfeld devices",
   "content_in_root": false,
   "render_readme": true
 }

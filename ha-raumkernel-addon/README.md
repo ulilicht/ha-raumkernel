@@ -1,4 +1,4 @@
-# Teufel Raumfeld (Raumkernel Addon)
+# Addon to integrate Teufel Raumfeld devices to Home Assistant
 
 A Home Assistant Add-on that provides a bridge to Teufel Raumfeld devices using the `node-raumkernel` library. The addon comes bundled with the Raumfeld integration and will install it automatically on startup. (can be disabled in the settings)
 
@@ -17,15 +17,10 @@ On first startup the addon will install the Raumfeld integration automatically. 
 
 ## Configuration
 
-| Option                | Default | Description                                |
-| --------------------- | ------- | ------------------------------------------ |
-| `LOG_LEVEL`           | `2`     | Logging verbosity (0-4)                    |
-| `PORT`                | `3000`  | WebSocket server port                      |
-| `ENABLE_AUTO_INSTALL` | `true`  | Auto-install/update integration on startup |
-| `DEVELOPER_MODE`      | `false` | Always copy integration files on startup   |
-
----
-
-## Development
-
-See [DEVELOPMENT.md](../DEVELOPMENT.md) in the repository folder for information on how to develop and deploy this addon.
+| Option                | Default | Description                                     |
+| --------------------- | ------- | ----------------------------------------------- |
+| `LOG_LEVEL`           | `2`     | Logging verbosity (0-4)                         |
+| `PORT`                | `3000`  | WebSocket server port                           |
+| `RAUMFELD_HOST`       | `""`    | Optional: Manually specify the Raumfeld host IP |
+| `ENABLE_AUTO_INSTALL` | `true`  | Auto-install/update integration on startup      |
+| `DEVELOPER_MODE`      | `false` | Always copy integration files on startup        |

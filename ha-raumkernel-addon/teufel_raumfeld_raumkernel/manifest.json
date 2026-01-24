@@ -1,6 +1,6 @@
 {
   "domain": "teufel_raumfeld_raumkernel",
-  "name": "Teufel Raumfeld (Raumkernel Addon)",
+  "name": "Raumkernel: Integration for Raumfeld devices",
   "codeowners": [
     "@ulilicht"
   ],

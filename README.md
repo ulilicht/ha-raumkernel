@@ -24,22 +24,22 @@ It consists of:
 ### Option A: Bundled Installation of Add-on and Integration
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
-2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Teufel Raumfeld (Raumkernel Addon)**: 
+2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Raumkernel: Addon for Raumfeld devices**:
 
- [![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+[![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
 4. Start the Add-on. It will automatically install the integration on first startup.
 5. Restart Home Assistant.
-6. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
+6. Go to **Settings > Devices & Services > Add Integration** and search for **Raumkernel: Addon for Raumfeld devices**.
 
 ### Option B: Separate Installation of Add-on and Integration
 
 #### 1. Install the Add-on
 
 1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**.
-2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Teufel Raumfeld (Raumkernel Addon)**: 
+2. Add [this repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel) to Homeassistant and install the **Raumkernel: Addon for Raumfeld devices**:
 
- [![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
+[![add Repository to Home Assistant and Install Add-on](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=4161e1f2_ha-raumkernel-addon&repository_url=https%3A%2F%2Fgithub.com%2Fulilicht%2Fha-raumkernel)
 
 3. Check the configuration: Disable automatic installation of the integration.
 4. **Start** the Add-on. It will be available unter your homeassistant IP on the configured port, e.g. http://homeassistant.local:3000
@@ -49,7 +49,7 @@ It consists of:
 1. Ensure the Add-on is running.
 2. In HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
 3. Restart Home Assistant.
-4. Go to **Settings > Devices & Services > Add Integration** and search for **Teufel Raumfeld (Raumkernel Addon)**.
+4. Go to **Settings > Devices & Services > Add Integration** and search for **Raumkernel: Integration for Teufel Raumfeld devices**.
 5. Install the integration. On first start, you will be asked for the adress of your Addon - default is localhost:3000.
 
 ⚠️ If you want to switch from HACS to Option A (automatic install), you need to completely remove the `custom_components/teufel_raumfeld_raumkernel` folder previously created by HACS.
@@ -76,3 +76,14 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) in the repository folder for information on
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Legal Disclaimer
+
+This is an unofficial project and is not affiliated with Lautsprecher Teufel GmbH.
+"Teufel" and "Raumfeld" are registered trademarks of Lautsprecher Teufel GmbH.
+The use of this software is at your own risk.
+
+**Rechtlicher Hinweis:**
+Dies ist ein inoffizielles Projekt und steht in keinerlei Verbindung zur Lautsprecher Teufel GmbH.
+"Teufel" und "Raumfeld" sind eingetragene Marken der Lautsprecher Teufel GmbH.
+Die Nutzung der Software erfolgt auf eigene Gefahr.
