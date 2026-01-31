@@ -593,7 +593,7 @@ class RaumkernelHelper {
             track: metadata.track,
             album: metadata.album,
             uri: metadata.uri || state.AVTransportURI || '',
-            image: metadata.image?.replace('http://', 'https://') ?? '',
+            image: this._sanitizeImageUrl(metadata.image),
             classString: metadata.classString,
             isPlaying,
             isLoading,
@@ -636,6 +636,25 @@ class RaumkernelHelper {
         // We also include podcast to handle podcast containers, but exclude items like musicTrack
         return classString.startsWith('object.container') || 
                /playlist|album|podcastContainer/i.test(classString);
+    }
+
+    /**
+     * Sanitizes an image URL, upgrading to HTTPS where supported.
+     * Local Raumfeld device URLs (e.g., /raumfeldImage on private IPs) are kept as HTTP
+     * because the device doesn't support TLS on these endpoints.
+     * @param {string} url 
+     * @returns {string}
+     */
+    _sanitizeImageUrl(url) {
+        if (!url) return '';
+        // Don't convert local Raumfeld image proxy URLs to HTTPS - device doesn't support TLS
+        // These URLs point to the Raumfeld host and redirect to external services
+        if (url.includes('/raumfeldImage') || 
+            /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost|127\.)/.test(url)) {
+            return url;
+        }
+        // Upgrade external URLs to HTTPS
+        return url.replace('http://', 'https://');
     }
 
     // ========================================================================
@@ -1122,7 +1141,7 @@ class RaumkernelHelper {
                 title: item.title || item.name || 'Unknown',
                 artist: item.artist,
                 album: item.album,
-                image: item.albumArtURI?.replace('http://', 'https://') ?? null,
+                image: this._sanitizeImageUrl(item.albumArtURI),
                 class: item.class,
                 playable: item.class?.startsWith('object.item') || item.class?.startsWith('object.container'),
                 isContainer: item.class?.startsWith('object.container') ?? false
@@ -1153,7 +1172,7 @@ class RaumkernelHelper {
                     title: getText(node, 'dc:title') || 'Unknown',
                     artist: getText(node, 'upnp:artist'),
                     album: getText(node, 'upnp:album'),
-                    image: getText(node, 'upnp:albumArtURI')?.replace('http://', 'https://') ?? null,
+                    image: this._sanitizeImageUrl(getText(node, 'upnp:albumArtURI')),
                     class: getText(node, 'upnp:class'),
                     playable: true,
                     isContainer: true
@@ -1167,7 +1186,7 @@ class RaumkernelHelper {
                     title: getText(node, 'dc:title') || 'Unknown',
                     artist: getText(node, 'upnp:artist'),
                     album: getText(node, 'upnp:album'),
-                    image: getText(node, 'upnp:albumArtURI')?.replace('http://', 'https://') ?? null,
+                    image: this._sanitizeImageUrl(getText(node, 'upnp:albumArtURI')),
                     class: getText(node, 'upnp:class'),
                     playable: true,
                     isContainer: false

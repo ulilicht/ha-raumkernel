@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { createServer } from 'http';
 import RaumkernelHelper from './RaumkernelHelper.js';
 import IntegrationManager from './IntegrationManager.js';
 
@@ -7,8 +8,6 @@ import fs from 'fs';
 // Run integration install/update check on startup
 const integrationManager = new IntegrationManager();
 await integrationManager.ensureIntegrationInstalled();
-
-let PORT = 3000;
 
 // Override console methods to add timestamps
 const originalLog = console.log;
@@ -30,18 +29,153 @@ console.warn = function(...args) {
 console.error = function(...args) {
     originalError(`[${getTimestamp()}]`, ...args);
 };
+
+const runtimeConfig = {
+    PORT: 3000,
+    RAUMFELD_HOST: process.env.RAUMFELD_HOST || '',
+    LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+    ENABLE_AUTO_INSTALL: true,
+    DEVELOPER_MODE: false
+};
+
 try {
     if (fs.existsSync('/data/options.json')) {
         const options = JSON.parse(fs.readFileSync('/data/options.json', 'utf8'));
-        if (options.PORT) PORT = options.PORT;
-        if (options.RAUMFELD_HOST) process.env.RAUMFELD_HOST = options.RAUMFELD_HOST;
-        if (options.LOG_LEVEL !== undefined) process.env.LOG_LEVEL = options.LOG_LEVEL;
+        if (options.PORT) runtimeConfig.PORT = options.PORT;
+        if (options.RAUMFELD_HOST) runtimeConfig.RAUMFELD_HOST = options.RAUMFELD_HOST;
+        if (options.LOG_LEVEL !== undefined) runtimeConfig.LOG_LEVEL = options.LOG_LEVEL;
+        if (options.ENABLE_AUTO_INSTALL !== undefined) runtimeConfig.ENABLE_AUTO_INSTALL = options.ENABLE_AUTO_INSTALL;
+        if (options.DEVELOPER_MODE !== undefined) runtimeConfig.DEVELOPER_MODE = options.DEVELOPER_MODE;
+        
+        // Propagate to process.env as some modules might use it
+        process.env.RAUMFELD_HOST = runtimeConfig.RAUMFELD_HOST;
+        process.env.LOG_LEVEL = runtimeConfig.LOG_LEVEL;
     }
 } catch {
-    console.warn('Failed to read /data/options.json, using default port 3000');
+    console.warn('Failed to read /data/options.json, using defaults');
 }
-if (process.env.PORT) PORT = process.env.PORT;
-const wss = new WebSocketServer({ port: PORT });
+
+if (process.env.PORT) runtimeConfig.PORT = process.env.PORT;
+let PORT = runtimeConfig.PORT;
+
+const server = createServer((req, res) => {
+    // Serve a simple status page
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Raumkernel Addon</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; background: #f6f6f6; }
+                .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 2rem; }
+                h1 { color: #333; margin-top: 0; }
+                .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 1rem; background: #e6fcf5; color: #0ca678; font-weight: bold; font-size: 0.875rem; }
+                .info { margin-top: 1.5rem; color: #666; line-height: 1.6; }
+                .config-section { margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1rem; }
+                .config-item { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+                .config-label { font-weight: 500; color: #555; }
+                .config-value { font-family: monospace; color: #333; }
+                code { background: #eee; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
+                
+                .json-box { 
+                    background: #fcfcfc; 
+                    color: #333;
+                    padding: 1rem; 
+                    border: 1px solid #eee; 
+                    border-radius: 4px; 
+                    overflow: auto; 
+                    max-height: 800px; 
+                    font-family: monospace; 
+                    font-size: 0.85em;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <span class="status">● Running</span>
+                <h1>Raumkernel Addon</h1>
+                <p>The addon server is running actively.</p>
+                <div class="info">
+                    <p>To use this addon, configure the Home Assistant integration to connect to this host on port <code>${PORT}</code>.</p>
+                    <p><strong>WebSocket Status:</strong> <span id="wsStatusText">Ready for connections</span><br>
+                    <strong>Integration Version:</strong> ${installedIntegrationVersion}<br>
+                    <strong>Addon Version:</strong> ${addonVersion}</p>
+                    
+                    <div class="config-section">
+                        <h3>Configuration</h3>
+                        <div class="config-item">
+                            <span class="config-label">PORT</span>
+                            <span class="config-value">${runtimeConfig.PORT}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">RAUMFELD_HOST</span>
+                            <span class="config-value">${runtimeConfig.RAUMFELD_HOST || '<i>(Auto-Discovery)</i>'}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">LOG_LEVEL</span>
+                            <span class="config-value">${runtimeConfig.LOG_LEVEL}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">ENABLE_AUTO_INSTALL</span>
+                            <span class="config-value">${runtimeConfig.ENABLE_AUTO_INSTALL}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">DEVELOPER_MODE</span>
+                            <span class="config-value">${runtimeConfig.DEVELOPER_MODE}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Full System State</h3>
+                <pre id="jsonOutput" class="json-box">Waiting for data...</pre>
+            </div>
+
+            <script>
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = \`\${wsProtocol}//\${window.location.host}\`;
+                const outputEl = document.getElementById('jsonOutput');
+                
+                let ws;
+
+                function connect() {
+                    ws = new WebSocket(wsUrl);
+
+                    ws.onopen = () => {
+                        // console.log('Connected');
+                    };
+
+                    ws.onclose = () => {
+                        setTimeout(connect, 3000);
+                    };
+
+                    ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'fullStateUpdate') {
+                                outputEl.textContent = JSON.stringify(data.payload, null, 2);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing message', e);
+                        }
+                    };
+                }
+
+                connect();
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+const wss = new WebSocketServer({ server });
+
+server.listen(PORT, () => {
+    console.log(`HTTP and WebSocket server started on port ${PORT}`);
+});
 const rkHelper = new RaumkernelHelper();
 
 // Log startup information
@@ -66,7 +200,9 @@ const installedIntegrationVersion = integrationManager.getInstalledVersion() || 
 
 console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion} integration=${installedIntegrationVersion}`);
 
-console.log(`WebSocket server started on port ${PORT}`);
+console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion} integration=${installedIntegrationVersion}`);
+
+// console.log(\`WebSocket server started on port \${PORT}\`); // Logged by server.listen callback now
 
 // Broadcast state to all connected clients
 const broadcast = (data) => {
