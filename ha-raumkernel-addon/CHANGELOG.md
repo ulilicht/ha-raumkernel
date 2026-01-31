@@ -1,3 +1,8 @@
+## 1.2.13
+
+- Fix track images which are hosted on Raumfeld devices (e.g. Local music, Tidal) not showing up.
+- Add information/debug page to the addon (reachable at the default port).
+
 ## 1.2.12
 
 - Added a setting to manually set the Raumfeld host address if auto discovery fails.
