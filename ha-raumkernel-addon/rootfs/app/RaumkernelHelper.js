@@ -112,6 +112,9 @@ class RaumkernelHelper {
         
         /** @type {Map<string, RoomInfo>} Room registry keyed by RENDERER UDN */
         this._rooms = new Map();
+
+        /** @type {Map<string, boolean>} Capability cache keyed by RENDERER UDN */
+        this._roomCapabilities = new Map();
         
         /** @type {{isReady: boolean, availableRooms: RoomState[], favourites: []}} */
         this._state = {
@@ -135,6 +138,10 @@ class RaumkernelHelper {
         
         const logPrefixes = ['ERROR', 'WARN ', 'INFO ', 'VERB ', 'DEBUG', 'SILLY'];
         this.raumkernel.logger.on('log', (data) => {
+            // Suppress expected errors during capability detection
+            if (data.log.includes('Source Select') && data.log.includes('GetDeviceSetting') && data.logType === 0) {
+                 return;
+            }
             const prefix = logPrefixes[data.logType] || `LVL${data.logType}`;
             console.log(`[RK] [${prefix}] ${data.log}`);
         });
@@ -220,6 +227,9 @@ class RaumkernelHelper {
             
             console.log(`${LOG_PREFIX.REGISTRY} Added: ${roomInfo.name} ` +
                 `(room: ${roomInfo.roomUdn}, renderer: ${roomInfo.rendererUdn})`);
+            
+            // Detect capabilities if getting a new room
+            this._detectCapabilities(rendererUdn, renderer);
         }
 
         this._broadcastRoomStates();
@@ -241,7 +251,8 @@ class RaumkernelHelper {
             rendererUdn,
             zoneUdn: null,
             zoneMembers: [roomUdn],
-            zoneName: null
+            zoneName: null,
+            sourceSwitchingSupported: this._roomCapabilities.get(rendererUdn) || false
         };
     }
 
@@ -314,6 +325,7 @@ class RaumkernelHelper {
                 currentZoneUdn: room.zoneUdn, // Alias for compatibility
                 zoneName: room.zoneName,
                 zoneMembers: room.zoneMembers,
+                sourceSwitchingSupported: room.sourceSwitchingSupported || false,
                 isPlaying: nowPlaying.isPlaying,
                 nowPlaying
             });
@@ -1222,6 +1234,34 @@ class RaumkernelHelper {
         }
 
         return items;
+    }
+
+    // ========================================================================
+    // CAPABILITY DETECTION
+    // ========================================================================
+
+    async _detectCapabilities(rendererUdn, renderer) {
+        if (this._roomCapabilities.has(rendererUdn)) return;
+
+        console.log(`${LOG_PREFIX.REGISTRY} detectCapabilities for ${rendererUdn}...`);
+        try {
+            // Probe for Source Select capability
+            await renderer.getDeviceSetting("Source Select");
+            // If it doesn't throw, it's supported
+            this._roomCapabilities.set(rendererUdn, true);
+            console.log(`${LOG_PREFIX.REGISTRY} ${rendererUdn} supports Source Select`);
+        } catch {
+            // 404/500 means not supported
+            this._roomCapabilities.set(rendererUdn, false);
+            console.log(`${LOG_PREFIX.REGISTRY} ${rendererUdn} does NOT support Source Select`);
+        }
+
+        // Trigger a state update to reflect the new capability
+        const room = this._rooms.get(rendererUdn);
+        if (room) {
+            room.sourceSwitchingSupported = this._roomCapabilities.get(rendererUdn);
+            this._broadcastRoomStates();
+        }
     }
 
     // ========================================================================

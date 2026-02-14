@@ -166,6 +166,12 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._zone_members = room_data.get("zoneMembers", [])
         self._current_zone_udn = room_data.get("currentZoneUdn")
 
+        # Capabilities
+        # Default to False if not present (older add-on versions)
+        self._source_switching_supported = room_data.get(
+            "sourceSwitchingSupported", False
+        )
+
         # Supported features
         features = (
             MediaPlayerEntityFeature.PLAY
@@ -178,8 +184,10 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.TURN_ON
             | MediaPlayerEntityFeature.SEEK
-            | MediaPlayerEntityFeature.SELECT_SOURCE
         )
+
+        if self._source_switching_supported:
+            features |= MediaPlayerEntityFeature.SELECT_SOURCE
 
         if now_playing.get("canPlayNext"):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
@@ -234,8 +242,10 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         return None
 
     @property
-    def source_list(self) -> list[str]:
+    def source_list(self) -> list[str] | None:
         """Return the list of available input sources."""
+        if not getattr(self, "_source_switching_supported", False):
+            return None
         # Hardcoded superset of sources. Add-on handles support checks.
         return ["Raumfeld", "LineIn", "OpticalIn", "TV_ARC"]
 

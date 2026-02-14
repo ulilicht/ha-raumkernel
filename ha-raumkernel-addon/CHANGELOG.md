@@ -1,3 +1,8 @@
+## 1.2.14
+
+- Add `selectSource` support for Soundbars and Sounddecks (TV_ARC, OpticalIn).
+- Update Integration to expose Source Select feature.
+
 ## 1.2.13
 
 - Fix track images which are hosted on Raumfeld devices (e.g. Local music, Tidal) not showing up.
