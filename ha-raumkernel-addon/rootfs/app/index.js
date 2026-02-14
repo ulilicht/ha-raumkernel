@@ -298,6 +298,10 @@ wss.on('connection', (ws) => {
                     await rkHelper.load(payload.roomUdn, payload.url);
                     break;
 
+                case 'selectSource':
+                    await rkHelper.setRoomSource(payload.room, payload.source);
+                    break;
+
                 case 'browse': {
                     const items = await rkHelper.browse(payload.objectId);
                     ws.send(JSON.stringify({ 

@@ -226,3 +226,7 @@ class RaumfeldApiClient:
     async def leave_group(self, room_udn: str) -> None:
         """Leave a zone (become standalone)."""
         await self.send_command("leaveGroup", {"roomUdn": room_udn})
+
+    async def select_source(self, room_udn: str, source: str) -> None:
+        """Select input source."""
+        await self.send_command("selectSource", {"room": room_udn, "source": source})

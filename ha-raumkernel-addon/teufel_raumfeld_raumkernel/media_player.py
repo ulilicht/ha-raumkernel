@@ -178,6 +178,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.TURN_ON
             | MediaPlayerEntityFeature.SEEK
+            | MediaPlayerEntityFeature.SELECT_SOURCE
         )
 
         if now_playing.get("canPlayNext"):
@@ -231,6 +232,16 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             return MediaType.MUSIC
 
         return None
+
+    @property
+    def source_list(self) -> list[str]:
+        """Return the list of available input sources."""
+        # Hardcoded superset of sources. Add-on handles support checks.
+        return ["Raumfeld", "LineIn", "OpticalIn", "TV_ARC"]
+
+    async def async_select_source(self, source: str) -> None:
+        """Select input source."""
+        await self._client.select_source(self._udn, source)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

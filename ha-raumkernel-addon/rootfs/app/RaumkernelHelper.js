@@ -1006,6 +1006,31 @@ class RaumkernelHelper {
         }
     }
 
+    async setRoomSource(roomIdentifier, source) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        let renderer = this._getRendererForRoom(room);
+
+        // For source switching, we want the virtual renderer if possible
+        if (!renderer?.setDeviceSetting) {
+            renderer = await this._ensureVirtualRenderer(room);
+        }
+
+        if (renderer?.setDeviceSetting) {
+            console.log(`${LOG_PREFIX.COMMAND} Setting source for ${room.name} to ${source}`);
+            try {
+                await renderer.setDeviceSetting("Source Select", source);
+            } catch (err) {
+                 console.error(`${LOG_PREFIX.COMMAND} Failed to set source for ${room.name}: ${err.message}`);
+                 // We don't throw here to avoid crashing the add-on, but we log it.
+                 // This is expected for devices that don't support "Source Select" (e.g. Speakers)
+            }
+        } else {
+             console.warn(`${LOG_PREFIX.COMMAND} Renderer for ${room.name} does not support setDeviceSetting`);
+        }
+    }
+
     // ========================================================================
     // MEDIA LOADING
     // ========================================================================
