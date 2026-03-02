@@ -1,0 +1,31 @@
+# Standalone Dockerfile for running Raumkernel outside of Home Assistant Supervisor.
+# Use this when running HA in Docker (without add-on support).
+#
+# Build:  docker build -f Dockerfile.standalone -t raumkernel .
+# Run:    docker run --network host -e PORT=3000 raumkernel
+
+FROM node:20-alpine
+
+RUN apk add --no-cache git openssh-client
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY rootfs/app/package.json rootfs/app/package-lock.json ./
+RUN npm ci --omit=dev
+
+# Copy application source files (not node_modules)
+COPY rootfs/app/*.js ./
+
+# Copy template needed by node-raumkernel
+RUN mkdir -p lib && \
+    cp node_modules/node-raumkernel/lib/setUriMetadata.template lib/
+
+# Environment variable defaults (no options.json needed)
+ENV PORT=3000
+ENV RAUMFELD_HOST=""
+ENV LOG_LEVEL=2
+
+EXPOSE 3000
+
+CMD ["node", "index.js"]

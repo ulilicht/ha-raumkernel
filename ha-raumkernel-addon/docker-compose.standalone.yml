@@ -1,0 +1,20 @@
+# Docker Compose for running Raumkernel as a standalone container.
+# Use this when running Home Assistant in Docker (without add-on/Supervisor support).
+#
+# Usage (from this directory):
+#   docker compose -f docker-compose.standalone.yml up -d --build
+#
+# Then install the integration via HACS and point it to this host's IP on port 3000.
+
+services:
+  raumkernel:
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
+    container_name: raumkernel
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=3000
+      - RAUMFELD_HOST=        # Leave empty for auto-discovery via SSDP
+      - LOG_LEVEL=2
