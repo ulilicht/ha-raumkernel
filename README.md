@@ -63,7 +63,7 @@ If you run Home Assistant in Docker (without add-on/Supervisor support), you can
 ```bash
 git clone https://github.com/ulilicht/ha-raumkernel.git
 cd ha-raumkernel/ha-raumkernel-addon
-docker compose -f docker-compose.standalone.yml up -d --build
+docker-compose -f docker-compose.standalone.yml up -d --build
 ```
 
 The server will be available at `http://<your-docker-host>:3000`.

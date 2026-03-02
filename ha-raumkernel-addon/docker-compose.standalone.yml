@@ -2,7 +2,7 @@
 # Use this when running Home Assistant in Docker (without add-on/Supervisor support).
 #
 # Usage (from this directory):
-#   docker compose -f docker-compose.standalone.yml up -d --build
+#   docker-compose -f docker-compose.standalone.yml up -d --build
 #
 # Then install the integration via HACS and point it to this host's IP on port 3000.
 
