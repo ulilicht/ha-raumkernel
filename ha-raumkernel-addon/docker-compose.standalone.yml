@@ -8,9 +8,7 @@
 
 services:
   raumkernel:
-    build:
-      context: .
-      dockerfile: Dockerfile.standalone
+    image: ghcr.io/ulilicht/ha-raumkernel:main
     container_name: raumkernel
     restart: unless-stopped
     network_mode: host

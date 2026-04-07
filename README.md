@@ -61,9 +61,7 @@ If you run Home Assistant in Docker (without add-on/Supervisor support), you can
 #### 1. Start the Raumkernel container
 
 ```bash
-git clone https://github.com/ulilicht/ha-raumkernel.git
-cd ha-raumkernel/ha-raumkernel-addon
-docker-compose -f docker-compose.standalone.yml up -d --build
+docker-compose -f docker-compose.standalone.yml up -d
 ```
 
 The server will be available at `http://<your-docker-host>:3000`.
@@ -79,9 +77,10 @@ The server will be available at `http://<your-docker-host>:3000`.
 #### 2. Install the Integration
 
 1. In HACS, add this repository [https://github.com/ulilicht/ha-raumkernel](https://github.com/ulilicht/ha-raumkernel) as a **Custom Repository** (Type: Integration).
-2. Restart Home Assistant.
-3. Go to **Settings > Devices & Services > Add Integration** and search for **Raumkernel**.
-4. Enter the IP/hostname of your Docker host and port `3000`.
+2. Install the `Raumkernel` extension
+3. Restart Home Assistant.
+4. Go to **Settings > Devices & Services > Add Integration** and search for **Raumkernel**.
+5. Enter the IP/hostname of your Docker host and port `3000`.
 
 ## Key Concepts: Rooms vs Zones
 
