@@ -1,8 +1,6 @@
 name: Docker
 
 on:
-  # for testing we allow to trigger manually
-  workflow_dispatch:
   push:
     branches: [ "main" ]
     tags: [ 'v*.*.*' ]
