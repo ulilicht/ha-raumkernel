@@ -115,7 +115,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
                     self.async_write_ha_state()
                     break
         elif data.get("type") == "fullStateUpdate":
-            rooms = data.get("payload", {}).get("availableZones", [])
+            rooms = data.get("payload", {}).get("availableRooms", [])
             for room in rooms:
                 if room["udn"] == self._udn:
                     self.update_state(room)

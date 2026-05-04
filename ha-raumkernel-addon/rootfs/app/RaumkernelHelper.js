@@ -530,19 +530,25 @@ class RaumkernelHelper {
         const isLoading = state.TransportState === 'TRANSITIONING';
         const isPlaying = state.TransportState === 'PLAYING';
 
-        // Detect track changes by watching AVTransportURI.
-        // When it changes (next track, playlist advance, external track load) we
-        // reset the position tracker to 0 so the display starts fresh.
-        // This is safe: our corrective Seek in play() does NOT change the URI,
-        // so this can't be triggered by late subscription events from that seek.
+        // Detect track changes by watching a fingerprint of AVTransportURI + CurrentTrack.
+        // AVTransportURI alone is not enough for container/playlist playback where the URI
+        // is a constant dlna-playcontainer:// reference and only CurrentTrack changes.
+        // When the fingerprint changes we reset the position tracker to 0.
+        // This is safe: our corrective Seek in play() does NOT change the URI or track
+        // number, so this detection cannot be triggered by late subscription events.
         if (room) {
             const currentUri = state.AVTransportURI || '';
-            if (currentUri) {
-                if (room._resumeAnchorUri === undefined) {
+            const currentTrackNum = String(state.CurrentTrack ?? '');
+            const fingerprint = currentUri ? `${currentUri}::${currentTrackNum}` : '';
+
+            if (fingerprint) {
+                if (room._resumeAnchorTrack === undefined) {
                     // First encounter — just record it; tracker may already be set
+                    room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
-                } else if (currentUri !== room._resumeAnchorUri) {
-                    // URI changed: device loaded a new track externally
+                } else if (fingerprint !== room._resumeAnchorTrack) {
+                    // Track changed: device loaded a new track externally
+                    room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
                     room._resumeAnchorSeconds = 0;
                     room._resumeAnchorTime = isPlaying ? Date.now() : null;
@@ -829,8 +835,10 @@ class RaumkernelHelper {
             const transportActions = renderer.rendererState?.CurrentTransportActions ?? '';
             const canSeek = /\bSeek\b/i.test(transportActions);
             const currentUri = renderer.rendererState?.AVTransportURI ?? '';
-            const trackerUri = room?._resumeAnchorUri;
-            const uriChanged = !!(trackerUri && currentUri && trackerUri !== currentUri);
+            const currentTrackNum = String(renderer.rendererState?.CurrentTrack ?? '');
+            const currentFingerprint = currentUri ? `${currentUri}::${currentTrackNum}` : '';
+            const trackerFingerprint = room?._resumeAnchorTrack;
+            const uriChanged = !!(trackerFingerprint && currentFingerprint && trackerFingerprint !== currentFingerprint);
 
             let pos = null;
 
@@ -1266,6 +1274,7 @@ class RaumkernelHelper {
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
             room._resumeAnchorUri = url;
+            room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
             return renderer.loadUri(url);
         }
 
@@ -1287,6 +1296,7 @@ class RaumkernelHelper {
             // New track: reset position tracker to the start
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
+            room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
             console.log(`${LOG_PREFIX.MEDIA} Loading container ${containerId} on ${room.name}`);
             return renderer.loadContainer(containerId);
         }
@@ -1309,6 +1319,7 @@ class RaumkernelHelper {
             // New track: reset position tracker to the start
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
+            room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
             console.log(`${LOG_PREFIX.MEDIA} Loading single ${itemId} on ${room.name}`);
             return renderer.loadSingle(itemId);
         }
