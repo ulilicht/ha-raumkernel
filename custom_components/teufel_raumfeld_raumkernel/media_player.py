@@ -86,6 +86,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_icon = "mdi:speaker-multiple"
         self._upnp_class = ""
         self._attr_media_content_id = None
+        self._attr_shuffle = False
+        self._attr_repeat = RepeatMode.OFF
         self.update_state(room_data)
 
     @property
@@ -193,11 +195,15 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         if now_playing.get("canPlayNext"):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
-            features |= MediaPlayerEntityFeature.SHUFFLE_SET
-            features |= MediaPlayerEntityFeature.REPEAT_SET
 
         if now_playing.get("canPlayPrev"):
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+
+        # Shuffle and repeat are always available via UPnP SetPlayMode.
+        # Don't gate them on canPlayNext — a single track still benefits from
+        # repeat-one, and the device will handle unsupported modes gracefully.
+        features |= MediaPlayerEntityFeature.SHUFFLE_SET
+        features |= MediaPlayerEntityFeature.REPEAT_SET
 
         features |= MediaPlayerEntityFeature.GROUPING
 
