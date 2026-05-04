@@ -226,3 +226,11 @@ class RaumfeldApiClient:
     async def leave_group(self, room_udn: str) -> None:
         """Leave a zone (become standalone)."""
         await self.send_command("leaveGroup", {"roomUdn": room_udn})
+
+    async def set_shuffle(self, room_udn: str, shuffle: bool) -> None:
+        """Enable or disable shuffle."""
+        await self.send_command("setShuffle", {"roomUdn": room_udn, "shuffle": shuffle})
+
+    async def set_repeat(self, room_udn: str, repeat: str) -> None:
+        """Set repeat mode ('off', 'one', 'all')."""
+        await self.send_command("setRepeat", {"roomUdn": room_udn, "repeat": repeat})
