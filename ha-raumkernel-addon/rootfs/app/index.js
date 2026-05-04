@@ -285,6 +285,14 @@ wss.on('connection', (ws) => {
                 case 'prev':
                     await rkHelper.setPrev(payload.roomUdn);
                     break;
+
+                case 'setShuffle':
+                    await rkHelper.setShuffle(payload.roomUdn, payload.shuffle);
+                    break;
+
+                case 'setRepeat':
+                    await rkHelper.setRepeat(payload.roomUdn, payload.repeat);
+                    break;
                     
                 case 'setVolume':
                     await rkHelper.setVolume(payload.roomUdn, payload.volume);

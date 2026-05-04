@@ -589,6 +589,13 @@ class RaumkernelHelper {
             ? state.RelativeTimePosition 
             : parseToSeconds(state.RelativeTimePosition);
 
+        // Derive shuffle / repeat from UPnP CurrentPlayMode
+        const playMode = (state.CurrentPlayMode || 'NORMAL').toUpperCase();
+        const shuffle = playMode === 'SHUFFLE' || playMode === 'RANDOM';
+        let repeat = 'off';
+        if (playMode === 'REPEAT_ONE') repeat = 'one';
+        else if (playMode === 'REPEAT_ALL' || playMode === 'RANDOM') repeat = 'all';
+
         return {
             artist: metadata.artist,
             track: metadata.track,
@@ -607,6 +614,8 @@ class RaumkernelHelper {
             durationSeconds,
             position: this._getPositionForRoom(room, state.RelativeTimePosition || 0),
             positionSeconds: this._getPositionForRoom(room, positionSeconds),
+            shuffle,
+            repeat,
             powerState
         };
     }
@@ -923,6 +932,65 @@ class RaumkernelHelper {
         const room = this.findRoom(roomIdentifier);
         const renderer = this._getRendererForRoom(room);
         if (renderer) return renderer.next();
+    }
+
+    /**
+     * Sets shuffle on or off while preserving the current repeat mode.
+     * UPnP play-mode matrix:
+     *   shuffle=false, repeat=off  → NORMAL
+     *   shuffle=true,  repeat=off  → SHUFFLE
+     *   shuffle=false, repeat=one  → REPEAT_ONE
+     *   shuffle=false, repeat=all  → REPEAT_ALL
+     *   shuffle=true,  repeat=all  → RANDOM
+     * @param {string} roomIdentifier
+     * @param {boolean} shuffle
+     */
+    async setShuffle(roomIdentifier, shuffle) {
+        const room = this.findRoom(roomIdentifier);
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        const current = (renderer.rendererState?.CurrentPlayMode || 'NORMAL').toUpperCase();
+        const repeatAll = current === 'REPEAT_ALL' || current === 'RANDOM';
+        const repeatOne = current === 'REPEAT_ONE';
+
+        let mode;
+        if (shuffle) {
+            mode = repeatAll ? 'RANDOM' : 'SHUFFLE';
+        } else {
+            if (repeatAll) mode = 'REPEAT_ALL';
+            else if (repeatOne) mode = 'REPEAT_ONE';
+            else mode = 'NORMAL';
+        }
+
+        console.log(`${LOG_PREFIX.COMMAND} SetPlayMode ${room?.name}: shuffle=${shuffle} → ${mode}`);
+        return renderer.setPlayMode(mode);
+    }
+
+    /**
+     * Sets repeat mode while preserving the current shuffle state.
+     * @param {string} roomIdentifier
+     * @param {'off'|'one'|'all'} repeat - HA repeat mode string
+     */
+    async setRepeat(roomIdentifier, repeat) {
+        const room = this.findRoom(roomIdentifier);
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        const current = (renderer.rendererState?.CurrentPlayMode || 'NORMAL').toUpperCase();
+        const isShuffle = current === 'SHUFFLE' || current === 'RANDOM';
+
+        let mode;
+        if (repeat === 'all') {
+            mode = isShuffle ? 'RANDOM' : 'REPEAT_ALL';
+        } else if (repeat === 'one') {
+            mode = 'REPEAT_ONE';
+        } else {
+            mode = isShuffle ? 'SHUFFLE' : 'NORMAL';
+        }
+
+        console.log(`${LOG_PREFIX.COMMAND} SetPlayMode ${room?.name}: repeat=${repeat} → ${mode}`);
+        return renderer.setPlayMode(mode);
     }
 
     async playSystemSound(roomIdentifier, soundId) {

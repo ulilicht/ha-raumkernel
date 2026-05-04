@@ -9,6 +9,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    RepeatMode,
 )
 from homeassistant.components.media_player.const import MediaClass, MediaType
 from homeassistant.config_entries import ConfigEntry
@@ -161,6 +162,16 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
             self._attr_media_position_updated_at = dt_util.utcnow()
 
+        # Shuffle and repeat mode
+        self._attr_shuffle = now_playing.get("shuffle", False)
+        repeat_raw = now_playing.get("repeat", "off")
+        if repeat_raw == "one":
+            self._attr_repeat = RepeatMode.ONE
+        elif repeat_raw == "all":
+            self._attr_repeat = RepeatMode.ALL
+        else:
+            self._attr_repeat = RepeatMode.OFF
+
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
         self._zone_members = room_data.get("zoneMembers", [])
@@ -182,6 +193,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         if now_playing.get("canPlayNext"):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
+            features |= MediaPlayerEntityFeature.SHUFFLE_SET
+            features |= MediaPlayerEntityFeature.REPEAT_SET
 
         if now_playing.get("canPlayPrev"):
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
@@ -353,6 +366,16 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         except Exception as err:
             _LOGGER.error("Failed to skip previous %s: %s", self._udn, err)
             raise
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        """Set shuffle mode."""
+        _LOGGER.debug("Calling async_set_shuffle for %s: %s", self._udn, shuffle)
+        await self._client.set_shuffle(self._udn, shuffle)
+
+    async def async_set_repeat(self, repeat: RepeatMode) -> None:
+        """Set repeat mode."""
+        _LOGGER.debug("Calling async_set_repeat for %s: %s", self._udn, repeat)
+        await self._client.set_repeat(self._udn, repeat)
 
     async def async_join_players(self, group_members: list[str]) -> None:
         """Join `group_members` to the current entity (master).
