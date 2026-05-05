@@ -577,15 +577,19 @@ class RaumkernelHelper {
             canPlayPrev = actions.includes('Previous');
         }
 
+        // Detect radio/live-stream content from UPnP object class.
+        // Stored on the room so play() can use it without re-parsing metadata.
+        const isRadio = !!(metadata.classString?.includes('audioBroadcast') ||
+                           metadata.classString?.includes('radio'));
+        if (room) room._isLiveStream = isRadio;
+
         // Fallback: Enable next/prev for container-based content (e.g. playlists)
         // only if not already explicitly enabled by transport actions.
         if (!canPlayNext || !canPlayPrev) {
             const isContainer = this._isContainerMedia(metadata.classString);
             const hasMultipleTracks = (parseInt(state.NumberOfTracks) || 0) > 1;
-            const isRadio = metadata.classString?.includes('audioBroadcast') || 
-                          metadata.classString?.includes('radio');
-            
-            // Radio stations never fallback to enabling next/prev buttons unless explicitly 
+
+            // Radio stations never fallback to enabling next/prev buttons unless explicitly
             // reported by the device's current transport actions.
             if (!isRadio && ((isContainer && metadata.track) || hasMultipleTracks)) {
                 canPlayNext = true;
@@ -830,8 +834,25 @@ class RaumkernelHelper {
         // Assistant loaded a new track bypassing our loadUri), because our elapsed-
         // time tracker would be stale from the previous track.
         if (renderer.rendererState?.TransportState === 'PAUSED_PLAYBACK') {
+            // Three independent live-stream guards — any one is enough to skip seek:
+            //  1. Duration: missing / zero / NOT_IMPLEMENTED → no seekable timeline
+            //  2. Media class: audioBroadcast / radio stored from last _extractNowPlaying call
+            //  3. Fresh metadata parse: catches external loads (MA, original app) that
+            //     bypassed loadUri() and therefore never set room._isLiveStream
             const durationStr = renderer.rendererState?.CurrentTrackDuration ?? '';
-            const isLiveStream = !durationStr || durationStr === '0:00:00' || durationStr === 'NOT_IMPLEMENTED';
+            const isLiveByDuration = !durationStr || durationStr === '0:00:00' || durationStr === 'NOT_IMPLEMENTED';
+            const isLiveByClass = !!(room?._isLiveStream);
+            const metaXml = renderer.rendererState?.CurrentTrackMetaData ||
+                            renderer.rendererState?.AVTransportURIMetaData || '';
+            let isLiveByMeta = false;
+            if (metaXml) {
+                try {
+                    const meta = this._parseMetadata(metaXml);
+                    isLiveByMeta = !!(meta.classString?.includes('audioBroadcast') ||
+                                      meta.classString?.includes('radio'));
+                } catch { /* ignore parse errors */ }
+            }
+            const isLiveStream = isLiveByDuration || isLiveByClass || isLiveByMeta;
             const transportActions = renderer.rendererState?.CurrentTransportActions ?? '';
             const canSeek = /\bSeek\b/i.test(transportActions);
             const currentUri = renderer.rendererState?.AVTransportURI ?? '';
