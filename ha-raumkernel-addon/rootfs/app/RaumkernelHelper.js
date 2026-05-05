@@ -595,6 +595,58 @@ class RaumkernelHelper {
                            metadata.classString?.includes('radio'));
         if (room && isRadio) room._isLiveStream = true;
 
+        // ---- Radio session renewal -----------------------------------------------
+        // Raumfeld streams have a <raumfeld:durability>120</raumfeld:durability> tag.
+        // After 120 s the Raumfeld kernel drops the stream because the TuneIn session
+        // URL has expired and no controller renewed it.  The Teufel app keeps the
+        // session alive by calling SetAVTransportURI again with the real station
+        // metadata (which contains the raumfeld:ebrowse URL the kernel uses to fetch
+        // a fresh session).  We replicate this by:
+        //   1. Caching the real station metadata on the room object whenever we see
+        //      it (metadata that has an ebrowse URL and a valid res URL).
+        //   2. Detecting the PLAYING → STOPPED/NO_MEDIA_PRESENT transition and
+        //      scheduling an auto-restart that re-loads with the cached metadata so
+        //      the kernel can renew on the next cycle.
+        if (room) {
+            // Cache real station metadata (only when metadata includes an ebrowse URL,
+            // meaning the kernel already enriched it from TuneIn's own feed).
+            if (isRadio && metadata.ebrowseUrl && metadata.uri) {
+                room._radioResUrl    = metadata.uri;
+                room._radioEbrowseUrl = metadata.ebrowseUrl;
+                // Store the raw XML so we can pass it verbatim to setAvTransportUri
+                // and give the kernel the ebrowse URL it needs for future renewal.
+                room._radioMetaXml   = state.CurrentTrackMetaData || state.AVTransportURIMetaData || '';
+            }
+
+            // Detect spontaneous stop (session expiry): PLAYING → STOPPED
+            const prevState = room._prevTransportState;
+            const currState = state.TransportState;
+            room._prevTransportState = currState;
+
+            const justStopped = prevState === 'PLAYING' &&
+                (currState === 'STOPPED' || currState === 'NO_MEDIA_PRESENT');
+
+            if (justStopped && room._isLiveStream === true && room._radioEbrowseUrl) {
+                const userStopped = !!(room._userInitiatedStop &&
+                    (Date.now() - room._userInitiatedStop) < 5000);
+                if (!userStopped) {
+                    // Debounce: cancel any previously scheduled restart for this room
+                    if (room._radioRestartTimer) {
+                        clearTimeout(room._radioRestartTimer);
+                        room._radioRestartTimer = null;
+                    }
+                    room._radioRestartTimer = setTimeout(() => {
+                        room._radioRestartTimer = null;
+                        this._autoRestartRadio(room).catch(err =>
+                            console.warn(`${LOG_PREFIX.COMMAND} Radio auto-restart failed for ${room.name}: ${err.message}`)
+                        );
+                    }, 2000);
+                    console.log(`${LOG_PREFIX.COMMAND} Stream stopped spontaneously for ${room.name} — restart scheduled in 2 s`);
+                }
+            }
+        }
+        // --------------------------------------------------------------------------
+
         // Fallback: Enable next/prev for container-based content (e.g. playlists)
         // only if not already explicitly enabled by transport actions.
         if (!canPlayNext || !canPlayPrev) {
@@ -741,7 +793,7 @@ class RaumkernelHelper {
      * @returns {MediaMetadata}
      */
     _parseMetadata(xml) {
-        const result = { track: '', artist: '', album: '', image: '', uri: '', classString: '' };
+        const result = { track: '', artist: '', album: '', image: '', uri: '', classString: '', ebrowseUrl: '' };
         if (!xml) return result;
 
         try {
@@ -756,6 +808,8 @@ class RaumkernelHelper {
             result.album = getText('upnp:album');
             result.image = getText('upnp:albumArtURI');
             result.uri = getText('res');
+            // Raumfeld-specific: URL used to get a fresh TuneIn session URL on renewal
+            result.ebrowseUrl = getText('raumfeld:ebrowse');
         } catch (err) {
             console.warn(`${LOG_PREFIX.MEDIA} Metadata parse error: ${err.message}`);
         }
@@ -1006,6 +1060,8 @@ class RaumkernelHelper {
         if (room) {
             room._resumeAnchorSeconds = undefined;
             room._resumeAnchorTime = null;
+            // Mark as user-initiated so the auto-restart logic won't fire
+            room._userInitiatedStop = Date.now();
         }
 
         try {
@@ -1388,6 +1444,62 @@ class RaumkernelHelper {
 
         console.warn(`${LOG_PREFIX.MEDIA} No renderer for single load: ${room.name}`);
     }
+
+    /**
+     * Automatically restarts a radio stream that stopped due to TuneIn session expiry.
+     *
+     * Raumfeld streams carry a <raumfeld:durability>120</raumfeld:durability> tag.
+     * When the session URL expires (~120 s) the Raumfeld kernel drops the stream.
+     * We recover by calling SetAVTransportURI again with the real station metadata
+     * (which includes the raumfeld:ebrowse URL the kernel uses to fetch a fresh
+     * session), followed by Play.
+     *
+     * The method is intentionally fire-and-forget (called from a setTimeout):
+     * it re-fetches the renderer at call time so the reference is always fresh.
+     */
+    async _autoRestartRadio(room) {
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        // Confirm the room is still in a stopped state (not playing something else)
+        const currState = renderer.rendererState?.TransportState;
+        if (currState !== 'STOPPED' && currState !== 'NO_MEDIA_PRESENT') {
+            console.log(`${LOG_PREFIX.COMMAND} Auto-restart cancelled for ${room.name}: state is now ${currState}`);
+            return;
+        }
+
+        // Double-check the stop was not user-initiated in the last 10 seconds
+        if (room._userInitiatedStop && (Date.now() - room._userInitiatedStop) < 10000) {
+            console.log(`${LOG_PREFIX.COMMAND} Auto-restart suppressed for ${room.name}: user-initiated stop`);
+            return;
+        }
+
+        const ebrowseUrl = room._radioEbrowseUrl;
+        const resUrl     = room._radioResUrl;
+        const metaXml    = room._radioMetaXml || '';
+        const url = ebrowseUrl || resUrl;
+        if (!url) {
+            console.warn(`${LOG_PREFIX.COMMAND} Auto-restart skipped for ${room.name}: no stream URL cached`);
+            return;
+        }
+
+        try {
+            console.log(`${LOG_PREFIX.COMMAND} Auto-restarting radio for ${room.name} → ${url.slice(0, 80)}`);
+            if (metaXml) {
+                // Pass the real station metadata so the Raumfeld kernel gets the
+                // ebrowse URL and can renew the session on the next cycle.
+                await renderer.setAvTransportUri(url, metaXml);
+            } else {
+                await renderer.loadUri(url);
+            }
+            await this._delay(600);
+            await renderer.play();
+            console.log(`${LOG_PREFIX.COMMAND} Auto-restart complete for ${room.name}`);
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.COMMAND} Auto-restart failed for ${room.name}: ${err.message}`);
+        }
+    }
+
 
     /**
      * Wakes up all physical renderers in a virtual renderer
