@@ -172,6 +172,27 @@ class RaumkernelHelper {
         this.raumkernel.on('rendererStateChanged', () => {
             this._broadcastRoomStates();
         });
+
+        // Proactive TuneIn session renewal.
+        // The Raumfeld kernel stops radio streams after <raumfeld:durability> seconds
+        // (typically 120 s) if nobody refreshes the session.  Every 90 s we call
+        // BendAVTransportURI for any room that is actively PLAYING a live stream and
+        // for which we have the real station metadata (including raumfeld:ebrowse URL).
+        // BendAVTransportURI updates the kernel's stored URI/metadata seamlessly,
+        // without stopping or interrupting the current playback.
+        setInterval(() => {
+            for (const room of this._rooms.values()) {
+                if (!room._isLiveStream || !room._radioResUrl || !room._radioMetaXml) continue;
+                const renderer = this._getRendererForRoom(room);
+                if (!renderer) continue;
+                if (renderer.rendererState?.TransportState !== 'PLAYING') continue;
+                renderer.bendAvTransportUri(room._radioResUrl, room._radioMetaXml)
+                    .catch(err => console.warn(
+                        `${LOG_PREFIX.COMMAND} Proactive renewal failed for ${room.name}: ${err.message}`
+                    ));
+                console.log(`${LOG_PREFIX.COMMAND} Proactive renewal sent for ${room.name}`);
+            }
+        }, 90000); // 90 s — well under the 120-s durability limit
     }
 
     _resetState() {
@@ -1450,9 +1471,15 @@ class RaumkernelHelper {
      *
      * Raumfeld streams carry a <raumfeld:durability>120</raumfeld:durability> tag.
      * When the session URL expires (~120 s) the Raumfeld kernel drops the stream.
-     * We recover by calling SetAVTransportURI again with the real station metadata
-     * (which includes the raumfeld:ebrowse URL the kernel uses to fetch a fresh
-     * session), followed by Play.
+     * We recover by calling SetAVTransportURI with the M3U stream URL (the <res>
+     * URL from the station metadata), optionally accompanied by the full station
+     * metadata XML (which includes the raumfeld:ebrowse URL the kernel can use to
+     * fetch a fresh session on the next cycle).
+     *
+     * IMPORTANT: the raumfeld:ebrowse URL must NOT be used as the transport URI
+     * because it returns OPML XML (not an M3U stream), which causes the Raumfeld
+     * kernel to get stuck in TRANSITIONING indefinitely.  Always use the <res> URL
+     * (i.e. room._radioResUrl) as the transport URI.
      *
      * The method is intentionally fire-and-forget (called from a setTimeout):
      * it re-fetches the renderer at call time so the reference is always fresh.
@@ -1474,10 +1501,10 @@ class RaumkernelHelper {
             return;
         }
 
-        const ebrowseUrl = room._radioEbrowseUrl;
-        const resUrl     = room._radioResUrl;
-        const metaXml    = room._radioMetaXml || '';
-        const url = ebrowseUrl || resUrl;
+        // Always use the M3U stream URL (<res> URL) as the transport URI.
+        // The ebrowse URL returns OPML and must NOT be used here.
+        const url     = room._radioResUrl;
+        const metaXml = room._radioMetaXml || '';
         if (!url) {
             console.warn(`${LOG_PREFIX.COMMAND} Auto-restart skipped for ${room.name}: no stream URL cached`);
             return;
@@ -1486,10 +1513,13 @@ class RaumkernelHelper {
         try {
             console.log(`${LOG_PREFIX.COMMAND} Auto-restarting radio for ${room.name} → ${url.slice(0, 80)}`);
             if (metaXml) {
-                // Pass the real station metadata so the Raumfeld kernel gets the
-                // ebrowse URL and can renew the session on the next cycle.
+                // Provide the real station metadata so the kernel has the ebrowse
+                // URL and can auto-renew the session on future 120-second cycles.
                 await renderer.setAvTransportUri(url, metaXml);
             } else {
+                // No real metadata cached yet; use the generic loadUri template.
+                // The stream will restart but may stop again after 120 s if the
+                // kernel can't find an ebrowse URL to renew with.
                 await renderer.loadUri(url);
             }
             await this._delay(600);
