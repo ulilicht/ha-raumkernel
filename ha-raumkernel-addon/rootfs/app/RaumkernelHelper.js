@@ -547,11 +547,16 @@ class RaumkernelHelper {
                     room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
                 } else if (fingerprint !== room._resumeAnchorTrack) {
-                    // Track changed: device loaded a new track externally
+                    // Track changed: device loaded a new track externally.
+                    // Only reset _isLiveStream when the URI itself changes (new media source).
+                    // If only the track number changed (same URI, e.g. song update on a radio
+                    // stream), preserve the live-stream flag set earlier for that URI.
+                    const uriActuallyChanged = currentUri !== room._resumeAnchorUri;
                     room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
                     room._resumeAnchorSeconds = 0;
                     room._resumeAnchorTime = isPlaying ? Date.now() : null;
+                    if (uriActuallyChanged) room._isLiveStream = undefined;
                     console.log(`${LOG_PREFIX.RENDERER} Track changed for ${room.name}: position tracker reset`);
                 }
             }
@@ -579,9 +584,16 @@ class RaumkernelHelper {
 
         // Detect radio/live-stream content from UPnP object class.
         // Stored on the room so play() can use it without re-parsing metadata.
+        // STICKY: only ever set to true, never overwrite back to false.
+        // When a radio station's "now playing" metadata updates, the UPnP class
+        // often changes to musicTrack for the current song — overwriting with
+        // false here would make play() think it's a file and issue a corrective
+        // seek on the live stream, disconnecting the source.
+        // The flag is reset to undefined only when a genuinely new URI is loaded
+        // (loadUri / loadContainer / loadSingle, or URI change detected above).
         const isRadio = !!(metadata.classString?.includes('audioBroadcast') ||
                            metadata.classString?.includes('radio'));
-        if (room) room._isLiveStream = isRadio;
+        if (room && isRadio) room._isLiveStream = true;
 
         // Fallback: Enable next/prev for container-based content (e.g. playlists)
         // only if not already explicitly enabled by transport actions.
@@ -1291,11 +1303,12 @@ class RaumkernelHelper {
 
         if (renderer?.loadUri) {
             await this._wakeRenderer(renderer);
-            // New track: reset position tracker to the start
+            // New track: reset position tracker and live-stream flag to the start
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
             room._resumeAnchorUri = url;
             room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
+            room._isLiveStream = undefined;       // Will be re-detected from metadata
             return renderer.loadUri(url);
         }
 
@@ -1314,10 +1327,11 @@ class RaumkernelHelper {
 
         if (renderer?.loadContainer) {
             await this._wakeRenderer(renderer);
-            // New track: reset position tracker to the start
+            // New track: reset position tracker and live-stream flag to the start
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
             room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
+            room._isLiveStream = undefined;       // Will be re-detected from metadata
             console.log(`${LOG_PREFIX.MEDIA} Loading container ${containerId} on ${room.name}`);
             return renderer.loadContainer(containerId);
         }
@@ -1337,10 +1351,11 @@ class RaumkernelHelper {
 
         if (renderer?.loadSingle) {
             await this._wakeRenderer(renderer);
-            // New track: reset position tracker to the start
+            // New track: reset position tracker and live-stream flag to the start
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime = Date.now();
             room._resumeAnchorTrack = undefined; // Will be set by _extractNowPlaying after load
+            room._isLiveStream = undefined;       // Will be re-detected from metadata
             console.log(`${LOG_PREFIX.MEDIA} Loading single ${itemId} on ${room.name}`);
             return renderer.loadSingle(itemId);
         }
