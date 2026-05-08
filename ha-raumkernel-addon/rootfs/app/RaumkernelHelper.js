@@ -549,21 +549,34 @@ class RaumkernelHelper {
                     room._resumeAnchorUri = currentUri;
                 } else if (fingerprint !== room._resumeAnchorTrack) {
                     // Track changed: device loaded a new track externally.
-                    // Only reset _isLiveStream when the URI itself changes (new media source).
-                    // If only the track number changed (same URI, e.g. song update on a radio
-                    // stream), preserve the live-stream flag set earlier for that URI.
+                    // _bendRenewalInProgress is set by _renewRadioSession() just before it
+                    // calls BendAVTransportURI so that the resulting URI change is not
+                    // mistaken for an external controller action.
                     const uriActuallyChanged = currentUri !== room._resumeAnchorUri;
+                    const isBendRenewal = !!room._bendRenewalInProgress;
+                    room._bendRenewalInProgress = false;
+
                     room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
                     room._resumeAnchorSeconds = 0;
                     room._resumeAnchorTime = isPlaying ? Date.now() : null;
-                    if (uriActuallyChanged) {
+
+                    if (uriActuallyChanged && !isBendRenewal) {
+                        // Only reset _isLiveStream when the URI itself changes due to an
+                        // external controller (not our own proactive renewal).
                         room._isLiveStream     = undefined;
-                        // An external controller changed the URI — clear the original URL so
-                        // _autoRestartRadio doesn't reload the wrong station if this stream stops.
                         room._radioOriginalUrl = undefined;
+                        // External URI change — cancel proactive renewal; the new content
+                        // may not be a radio stream and we don't have its ebrowse URL yet.
+                        if (room._radioRenewalTimer) {
+                            clearTimeout(room._radioRenewalTimer);
+                            room._radioRenewalTimer = null;
+                        }
                     }
-                    console.log(`${LOG_PREFIX.RENDERER} Track changed for ${room.name}: position tracker reset`);
+
+                    if (!isBendRenewal) {
+                        console.log(`${LOG_PREFIX.RENDERER} Track changed for ${room.name}: position tracker reset`);
+                    }
                 }
             }
 
@@ -602,26 +615,48 @@ class RaumkernelHelper {
         if (room && isRadio) room._isLiveStream = true;
 
         // ---- Radio session renewal -----------------------------------------------
-        // TuneIn session management: the Raumfeld kernel drops a stream when the
-        // TuneIn proxy session expires.  When this happens the zone goes PLAYING →
-        // STOPPED and CurrentTransportActions switches from 'Stop' to 'Play'.
+        // TuneIn session management.
         //
-        // Key insight from log analysis: when Play() is sent to a zone renderer that
-        // is in STOPPED state (with CurrentTransportActions including 'Play'), the
-        // kernel uses the raumfeld:ebrowse URL it already has in its stored metadata
-        // to open a FRESH TuneIn session — identical to what the Teufel app does when
-        // the user taps Play after a stream has expired.  No SetAVTransportURI call is
-        // needed; the kernel handles session renewal itself.
+        // The Raumfeld kernel drops a TuneIn stream when the proxy session expires
+        // (raumfeld:durability hint = 120 s, but real expiry is variable: 55–834 s).
+        // The native Teufel app prevents gaps by calling BendAVTransportURI with the
+        // permanent raumfeld:ebrowse URL every ~90 s, causing the kernel to fetch a
+        // fresh TuneIn session seamlessly — no audible interruption.
+        //
+        // We replicate this with two mechanisms:
+        //   1. Proactive renewal: schedule _renewRadioSession() at 90 s intervals while
+        //      a live stream is PLAYING.  It calls BendAVTransportURI with the ebrowse
+        //      URL + stripped metadata (no expired <res>).
+        //   2. Reactive restart (safety net): if the stream drops before renewal fires,
+        //      detect PLAYING → STOPPED and call Play() to resume with a new session.
         if (room) {
-            // Detect spontaneous stop: PLAYING → STOPPED / NO_MEDIA_PRESENT.
+            // Cache station metadata whenever the kernel emits enriched DIDL-Lite with ebrowse.
+            // Used by _renewRadioSession() to build the BendAVTransportURI payload.
+            if (isRadio && metadata.ebrowseUrl) {
+                room._radioEbrowseUrl = metadata.ebrowseUrl;
+                room._radioMetaXml    = state.CurrentTrackMetaData || state.AVTransportURIMetaData || '';
+            }
+
             const prevState = room._prevTransportState;
             const currState = state.TransportState;
             room._prevTransportState = currState;
 
+            const justStartedPlaying = prevState !== 'PLAYING' && currState === 'PLAYING';
             const justStopped = prevState === 'PLAYING' &&
                 (currState === 'STOPPED' || currState === 'NO_MEDIA_PRESENT');
 
+            // Schedule proactive renewal when playback starts (or resumes) for a live stream.
+            if (justStartedPlaying && room._isLiveStream === true && room._radioEbrowseUrl) {
+                this._scheduleRadioRenewal(room);
+            }
+
             if (justStopped && room._isLiveStream === true) {
+                // Stream dropped — cancel proactive renewal (auto-restart will resume it).
+                if (room._radioRenewalTimer) {
+                    clearTimeout(room._radioRenewalTimer);
+                    room._radioRenewalTimer = null;
+                }
+
                 const userStopped = !!(room._userInitiatedStop &&
                     (Date.now() - room._userInitiatedStop) < 10000);
                 if (!userStopped) {
@@ -1057,6 +1092,11 @@ class RaumkernelHelper {
             room._resumeAnchorTime = null;
             // Mark as user-initiated so the auto-restart logic won't fire
             room._userInitiatedStop = Date.now();
+            // Cancel proactive renewal timer — user explicitly stopped the stream
+            if (room._radioRenewalTimer) {
+                clearTimeout(room._radioRenewalTimer);
+                room._radioRenewalTimer = null;
+            }
         }
 
         try {
@@ -1386,13 +1426,16 @@ class RaumkernelHelper {
             room._resumeAnchorUri     = url;
             room._resumeAnchorTrack   = undefined; // Will be set by _extractNowPlaying after load
             room._isLiveStream        = undefined; // Will be re-detected from metadata
-            // Store the permanent station URL so _autoRestartRadio can restart with a
-            // fresh TuneIn session (the cached <res> URL expires after ~120 s).
             room._radioOriginalUrl    = url;
             // Mark as user-initiated so that the PLAYING→STOPPED transition that occurs
             // when the device switches to the new station does not trigger auto-restart
             // of the *previous* stream.
             room._userInitiatedStop   = Date.now();
+            // Cancel any pending proactive renewal from the previous stream
+            if (room._radioRenewalTimer) {
+                clearTimeout(room._radioRenewalTimer);
+                room._radioRenewalTimer = null;
+            }
             return renderer.loadUri(url);
         }
 
@@ -1417,6 +1460,10 @@ class RaumkernelHelper {
             room._resumeAnchorTrack   = undefined;
             room._isLiveStream        = undefined;
             room._userInitiatedStop   = Date.now(); // Suppress false auto-restart
+            if (room._radioRenewalTimer) {
+                clearTimeout(room._radioRenewalTimer);
+                room._radioRenewalTimer = null;
+            }
             console.log(`${LOG_PREFIX.MEDIA} Loading container ${containerId} on ${room.name}`);
             return renderer.loadContainer(containerId);
         }
@@ -1442,11 +1489,92 @@ class RaumkernelHelper {
             room._resumeAnchorTrack   = undefined;
             room._isLiveStream        = undefined;
             room._userInitiatedStop   = Date.now(); // Suppress false auto-restart
+            if (room._radioRenewalTimer) {
+                clearTimeout(room._radioRenewalTimer);
+                room._radioRenewalTimer = null;
+            }
             console.log(`${LOG_PREFIX.MEDIA} Loading single ${itemId} on ${room.name}`);
             return renderer.loadSingle(itemId);
         }
 
         console.warn(`${LOG_PREFIX.MEDIA} No renderer for single load: ${room.name}`);
+    }
+
+    /**
+     * Schedules a proactive TuneIn session renewal for a live radio stream.
+     *
+     * The renewal fires at 90 s — before the raumfeld:durability window (120 s)
+     * closes — and calls BendAVTransportURI with the permanent ebrowse URL so the
+     * Raumfeld kernel fetches a fresh TuneIn session seamlessly (no audible gap).
+     * After a successful renewal the timer reschedules itself for another 90 s.
+     */
+    _scheduleRadioRenewal(room) {
+        if (room._radioRenewalTimer) {
+            clearTimeout(room._radioRenewalTimer);
+        }
+        room._radioRenewalTimer = setTimeout(() => {
+            room._radioRenewalTimer = null;
+            this._renewRadioSession(room).catch(err =>
+                console.warn(`${LOG_PREFIX.COMMAND} Radio renewal error for ${room.name}: ${err.message}`)
+            );
+        }, 90000);
+    }
+
+    /**
+     * Proactively renews the TuneIn session for a live radio stream by calling
+     * BendAVTransportURI with the permanent ebrowse URL.
+     *
+     * BendAVTransportURI is a Raumfeld-specific UPnP action that updates the
+     * transport URI and metadata WITHOUT stopping the current stream (unlike
+     * SetAVTransportURI which requires a subsequent Play() call and causes a gap).
+     * The kernel uses the raumfeld:ebrowse URL in the new metadata to obtain a
+     * fresh TuneIn session URL and seamlessly switches the audio path.
+     *
+     * Key differences from the failed v1.2.30 approach:
+     *   - We use the PERMANENT ebrowse URL (Tune.ashx?id=s15552&c=ebrowse) not the
+     *     session-specific <res> URL (Tune.ashx?id=e178794027) that is already
+     *     expiring at the 90 s mark.
+     *   - We strip the <res> element from the metadata so the kernel doesn't see a
+     *     conflicting, expired session URL alongside the fresh ebrowse URL.
+     *   - We set _bendRenewalInProgress before calling so that the resulting
+     *     AVTransportURI change is not treated as an external track change by
+     *     _extractNowPlaying (which would reset _isLiveStream and kill renewal).
+     */
+    async _renewRadioSession(room) {
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        // Bail if the stream is not currently playing
+        const currState = renderer.rendererState?.TransportState;
+        if (currState !== 'PLAYING') return;
+
+        const ebrowseUrl = room._radioEbrowseUrl;
+        if (!ebrowseUrl) return;
+
+        if (!renderer.bendAvTransportUri) {
+            console.log(`${LOG_PREFIX.COMMAND} BendAVTransportURI not available for ${room.name} — skipping renewal`);
+            return;
+        }
+
+        // Strip expired <res> session URL; retain raumfeld:ebrowse and all other fields.
+        const rawMeta      = room._radioMetaXml || '';
+        const strippedMeta = rawMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/gi, '').trim();
+        if (!strippedMeta) return;
+
+        // Flag this as our own renewal so track-change detection doesn't reset _isLiveStream.
+        room._bendRenewalInProgress = true;
+
+        try {
+            console.log(`${LOG_PREFIX.COMMAND} Proactive renewal for ${room.name} → ${ebrowseUrl.slice(0, 80)}`);
+            await renderer.bendAvTransportUri(ebrowseUrl, strippedMeta);
+            // Schedule the next renewal cycle
+            this._scheduleRadioRenewal(room);
+            console.log(`${LOG_PREFIX.COMMAND} Renewal sent for ${room.name}`);
+        } catch (err) {
+            room._bendRenewalInProgress = false;
+            console.warn(`${LOG_PREFIX.COMMAND} BendAVTransportURI failed for ${room.name}: ${err.message}`);
+            // Stream may be dead — reactive auto-restart will handle recovery
+        }
     }
 
     /**
@@ -1458,6 +1586,9 @@ class RaumkernelHelper {
      * Sending a Play() action causes the kernel to call the ebrowse URL, obtain a
      * fresh TuneIn session, and resume the stream — exactly as if the user had
      * tapped Play manually.  No SetAVTransportURI call is needed or wanted.
+     *
+     * This method is the SAFETY NET for cases where proactive renewal (_renewRadioSession)
+     * did not prevent the stream from dropping.
      *
      * The method is intentionally fire-and-forget (called from a setTimeout):
      * it re-fetches the renderer at call time so the reference is always fresh.
