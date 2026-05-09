@@ -1534,40 +1534,46 @@ class RaumkernelHelper {
     /**
      * Recovers a live-stream room that is stuck in TRANSITIONING.
      *
-     * This can happen when a prior BendAVTransportURI call (or other event) left the
-     * AVTransportURI pointing at an unresolvable endpoint (e.g. a raw ebrowse URL).
-     * The Raumfeld kernel stays in TRANSITIONING indefinitely in that case.
-     *
-     * We force a full station reload via loadSingle(refId) so the kernel gets a fresh
-     * content-directory lookup with proper metadata.  A 35 s suppression window on
-     * _userInitiatedStop ensures we don't interfere with normal loadSingle() restarts.
+     * When the Raumfeld kernel is stuck in TRANSITIONING (e.g. after a failed load
+     * or a corrupted AVTransportURI), issuing another SetAVTransportURI alone is not
+     * enough — the kernel may silently accept it but never reach PLAYING because its
+     * internal state is confused.  We therefore issue a Stop() first to reset the
+     * kernel to a clean STOPPED state, then reload the station via loadSingle(refId).
+     * This mirrors the user-visible fix: Pause → browse → loadSingle.
      */
     async _recoverStuckTransition(room) {
         const renderer = this._getRendererForRoom(room);
         if (!renderer) return;
 
-        // Only act if still stuck
+        // Only act if still stuck (the timer might fire after the device recovered on its own)
         const actualState = renderer.rendererState?.TransportState;
         if (actualState !== 'TRANSITIONING') return;
-
-        // If the user recently issued a command (including our own auto-restart loadSingle),
-        // that command is still loading — give it a full 35 s before intervening.
-        if (room._userInitiatedStop && (Date.now() - room._userInitiatedStop) < 35000) return;
 
         if ((room._autoRestartAttempts ?? 0) >= 5) {
             console.warn(`${LOG_PREFIX.COMMAND} Stuck-transition retry limit for ${room.name} — giving up`);
             return;
         }
         room._autoRestartAttempts = (room._autoRestartAttempts ?? 0) + 1;
-        room._userInitiatedStop = Date.now(); // Suppress false restart during recovery
+
+        // Set before stop() to suppress any justStopped restart the stop() triggers,
+        // and to prevent _autoRestartRadio from firing during this recovery sequence.
+        room._userInitiatedStop = Date.now();
+
+        // Stop first to reset the kernel's internal state — a lone SetAVTransportURI
+        // on a confused TRANSITIONING device is often silently ignored.
+        try {
+            await renderer.stop();
+        } catch (_) { /* best-effort */ }
+
+        // Brief pause so the device settles to STOPPED before we load again.
+        await new Promise(r => setTimeout(r, 500));
 
         const refId = room._radioRefId;
         if (refId && typeof renderer.loadSingle === 'function') {
-            console.log(`${LOG_PREFIX.COMMAND} Stream stuck in TRANSITIONING for ${room.name} — force-reload via loadSingle: ${refId}`);
+            console.log(`${LOG_PREFIX.COMMAND} Stream stuck in TRANSITIONING for ${room.name} — stop+reload via loadSingle: ${refId}`);
             await renderer.loadSingle(refId);
         } else {
-            // No refId available — try bare Play() to nudge the kernel out of stuck state
-            console.log(`${LOG_PREFIX.COMMAND} Stream stuck in TRANSITIONING for ${room.name} — nudging with Play()`);
+            console.log(`${LOG_PREFIX.COMMAND} Stream stuck in TRANSITIONING for ${room.name} — stop+play nudge`);
             await renderer.play();
         }
     }
@@ -1614,11 +1620,13 @@ class RaumkernelHelper {
         // performs a full SetAVTransportURI with fresh station metadata (including
         // the raumfeld:ebrowse URL).  This mirrors what the native app does and
         // ensures the kernel sets up its internal TuneIn session renewal properly.
-        // Setting _userInitiatedStop suppresses a false auto-restart that could be
-        // triggered by the brief STOPPED state during the SetAVTransportURI phase.
+        // We do NOT set _userInitiatedStop here so that:
+        //   a) the stuck-TRANSITIONING watchdog can fire unimpeded if loadSingle
+        //      leads to a stuck TRANSITIONING state, and
+        //   b) justStopped can schedule a retry if loadSingle results in
+        //      TRANSITIONING → STOPPED (failed session start).
         const refId = room._radioRefId;
         if (refId && typeof renderer.loadSingle === 'function') {
-            room._userInitiatedStop = Date.now();
             try {
                 console.log(`${LOG_PREFIX.COMMAND} Auto-restart via loadSingle for ${room.name}: ${refId}`);
                 await renderer.loadSingle(refId);
@@ -1626,7 +1634,6 @@ class RaumkernelHelper {
                 return;
             } catch (err) {
                 console.warn(`${LOG_PREFIX.COMMAND} loadSingle failed for ${room.name}: ${err.message} — falling back to Play()`);
-                room._userInitiatedStop = undefined;
             }
         }
 
