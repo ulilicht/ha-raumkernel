@@ -725,10 +725,12 @@ class RaumkernelHelper {
                         clearTimeout(room._radioRestartTimer);
                         room._radioRestartTimer = null;
                     }
-                    // First attempt uses a shorter delay and a fast Play() path.
-                    // Subsequent attempts (Play() failed → TRANSITIONING → STOPPED)
-                    // use a longer delay and a full loadSingle reload.
-                    const restartDelay = attempts === 0 ? 200 : 500;
+                    // Always use loadSingle with durability=0 (forces a fresh TuneIn
+                    // ebrowse call → new session ID → no CDN throttle).  A bare Play()
+                    // reuses the same stale session ID; after ~7 connections TuneIn
+                    // throttles that ID and cuts the CDN connection lifetime to ~60 s,
+                    // causing a rapid cascade of drops every minute instead of every 2.
+                    const restartDelay = 200;
                     room._radioRestartTimer = setTimeout(() => {
                         room._radioRestartTimer = null;
                         this._autoRestartRadio(room).catch(err =>
@@ -1659,12 +1661,12 @@ class RaumkernelHelper {
      * When the TuneIn proxy session expires, the Raumfeld kernel transitions the
      * zone to STOPPED and sets CurrentTransportActions to 'Play'.
      *
-     * Recovery: if we have the content-directory refID for the station (cached from
-     * DIDL-Lite metadata as _radioRefId), we call loadSingle(refId).  This triggers
-     * a full SetAVTransportURI with fresh station metadata, identical to how the native
-     * app reloads a station, and ensures the kernel sets up its internal TuneIn session
-     * renewal properly for the new session.  If no refId is available, we fall back to
-     * a bare Play() call so the kernel resumes from its last stored state.
+     * Recovery: we call loadSingle(refId, metadata_with_durability_0).  Passing
+     * durability=0 signals to the kernel that the current TuneIn session is expired
+     * so it immediately calls raumfeld:ebrowse to obtain a brand-new session ID and
+     * CDN redirect URL.  Using a fresh session ID is critical: bare Play() reuses the
+     * same stale session ID, and after ~7 rapid proxy reconnections TuneIn throttles
+     * that session to a ~60 s CDN connection lifetime, causing a cascade of drops.
      *
      * The method is intentionally fire-and-forget (called from a setTimeout):
      * it re-fetches the renderer at call time so the reference is always fresh.
@@ -1691,34 +1693,16 @@ class RaumkernelHelper {
         // Track consecutive restart attempts so _extractNowPlaying can enforce the cap.
         room._autoRestartAttempts = (room._autoRestartAttempts ?? 0) + 1;
 
-        // ── Attempt 1: fast Play() path ────────────────────────────────────────
-        // The kernel already holds the station metadata (raumfeld:ebrowse, durability)
-        // from the last SetAVTransportURI call.  A bare Play() command tells the
-        // kernel to resume: because the session has just expired, the kernel will
-        // call the ebrowse URL itself to obtain a fresh TuneIn redirect URL and
-        // reconnect.  This is ~3–4× faster than a full loadSingle reload (≈2 s vs
-        // ≈8 s gap) and avoids disrupting the kernel's internal session bookkeeping.
+        // ── loadSingle with durability=0 ──────────────────────────────────────
+        // Passing durability=0 tells the kernel the current TuneIn session is
+        // expired; the kernel immediately calls raumfeld:ebrowse to obtain a
+        // brand-new session ID and CDN redirect URL, then reconnects.
         //
-        // If Play() does NOT restore playback (the stream immediately goes
-        // TRANSITIONING → STOPPED again), the wasFailedLoad branch fires, schedules
-        // attempt 2, and we fall through to the loadSingle path below.
-        if (room._autoRestartAttempts === 1) {
-            try {
-                console.log(`${LOG_PREFIX.COMMAND} Auto-restart via Play() for ${room.name} (attempt 1, fast path)`);
-                await renderer.play();
-                console.log(`${LOG_PREFIX.COMMAND} Auto-restart (Play) issued for ${room.name}`);
-                return;
-            } catch (err) {
-                console.warn(`${LOG_PREFIX.COMMAND} Play() failed for ${room.name}: ${err.message} — escalating to loadSingle`);
-                // Fall through to the loadSingle path.
-            }
-        }
-
-        // ── Attempt 2+: full loadSingle reload ────────────────────────────────
-        // Play() either failed outright or the stream dropped again immediately.
-        // Force a complete session reset via loadSingle, passing durability=0 so
-        // the kernel immediately calls ebrowse for a fresh session URL rather than
-        // reusing the stale one that just caused the drop.
+        // Why not bare Play()?  Play() reuses the same stale session ID already
+        // held by the kernel.  After ~7 rapid proxy connections TuneIn throttles
+        // that session and cuts the CDN connection lifetime to ~60 s, causing a
+        // cascade of drops every minute instead of every 2 minutes.  loadSingle
+        // forces a fresh TuneIn session on each restart, keeping full 120 s TTL.
         //
         // We do NOT set _userInitiatedStop here so that:
         //   a) the stuck-TRANSITIONING watchdog can fire if loadSingle leads to
