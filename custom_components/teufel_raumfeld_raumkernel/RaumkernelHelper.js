@@ -170,7 +170,24 @@ class RaumkernelHelper {
         });
 
         this.raumkernel.on('rendererStateChanged', () => {
-            this._broadcastRoomStates();
+            // Defer processing to the next event-loop tick so that the NOTIFY
+            // acknowledgment (200 OK from our HTTP server) can be sent immediately
+            // rather than blocking for ~50 ms while _broadcastRoomStates() runs
+            // synchronously.  The Raumfeld kernel waits for our ACK before it can
+            // proceed with the next operation — including issuing the outbound
+            // TuneIn ebrowse HTTP call for session renewal.  When we're slow (e.g.
+            // during the 38-request burst after a UPnP device-list rediscovery),
+            // the kernel stalls and misses the 120-second renewal window → STOPPED.
+            //
+            // Deduplication: if multiple events arrive before the deferred call runs
+            // (burst during device rediscovery), only one _broadcastRoomStates()
+            // executes — the final one after all events have settled.
+            if (this._broadcastScheduled) return;
+            this._broadcastScheduled = true;
+            setImmediate(() => {
+                this._broadcastScheduled = false;
+                this._broadcastRoomStates();
+            });
         });
 
     }
@@ -996,6 +1013,10 @@ class RaumkernelHelper {
         const renderer = this._getRendererForRoom(room);
         if (!renderer) return;
 
+        // User explicitly pressed PLAY — clear any user-stop flag so that if the
+        // resulting load fails, the auto-restart is free to kick in again.
+        if (room) room._userInitiatedStop = null;
+
         await this._wakeRenderer(renderer);
 
         // Work around a Raumfeld device quirk: when resuming from PAUSED_PLAYBACK
@@ -1145,6 +1166,43 @@ class RaumkernelHelper {
                 } else if (!canSeek) {
                     console.log(`${LOG_PREFIX.COMMAND} Skipping seek: not supported by device for ${room?.name}`);
                 }
+            }
+        }
+
+        // For live radio streams in STOPPED state: use loadSingle(durability=0) instead
+        // of bare Play().
+        //
+        // When the renderer is STOPPED (not PAUSED_PLAYBACK), a bare Play() reconnects
+        // to the existing TuneIn session but creates a brand-new, "young" proxy
+        // connection whose CDN lease only just started.  If the kernel's 120-second
+        // session-renewal timer fires while that proxy is only seconds old, the CDN
+        // handoff fails → another STOPPED.
+        //
+        // loadSingle(durability=0) forces the kernel to call raumfeld:ebrowse, which
+        // obtains a brand-new TuneIn session ID and CDN URL and resets the renewal
+        // timer to NOW+120 s.  By the time the next renewal fires, the proxy will have
+        // been alive for the full 120 s → stable CDN handoff → no drop.
+        //
+        // PAUSED_PLAYBACK is not affected: the CDN connection is still live and a bare
+        // Play() gives an instant, gap-free resume without creating a new proxy.
+        if (room?._isLiveStream === true &&
+            renderer.rendererState?.TransportState === 'STOPPED' &&
+            room._radioRefId &&
+            typeof renderer.loadSingle === 'function') {
+            try {
+                const avtMeta = this._stampDurabilityExpired(room._radioAvtMetadata || '');
+                console.log(
+                    `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→fresh session) for ` +
+                    `${room.name}: ${room._radioRefId}`
+                );
+                await renderer.loadSingle(room._radioRefId, avtMeta);
+                return;
+            } catch (err) {
+                console.warn(
+                    `${LOG_PREFIX.COMMAND} play() loadSingle failed for ${room.name}: ` +
+                    `${err.message} — falling back to Play()`
+                );
+                // Fall through to bare renderer.play() below.
             }
         }
 
