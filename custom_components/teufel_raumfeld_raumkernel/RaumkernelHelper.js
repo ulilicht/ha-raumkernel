@@ -1206,6 +1206,33 @@ class RaumkernelHelper {
             }
         }
 
+        // Live stream stuck in TRANSITIONING: bare Play() is silently ignored by
+        // the device.  Mirror _recoverStuckTransition: issue Stop() first to clear
+        // the confused state, then loadSingle(durability=0) for a fresh session.
+        // This handles the case where the user presses PLAY in HA after a failed
+        // automatic recovery, giving them a reliable escape hatch.
+        if (room?._isLiveStream === true &&
+            renderer.rendererState?.TransportState === 'TRANSITIONING' &&
+            room._radioRefId &&
+            typeof renderer.loadSingle === 'function') {
+            try {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} play() live stream (TRANSITIONING→stop+reload) for ` +
+                    `${room.name}`
+                );
+                await renderer.stop();
+                await this._delay(300);
+                const avtMeta = this._stampDurabilityExpired(room._radioAvtMetadata || '');
+                await renderer.loadSingle(room._radioRefId, avtMeta);
+                return;
+            } catch (err) {
+                console.warn(
+                    `${LOG_PREFIX.COMMAND} play() TRANSITIONING recovery failed for ${room.name}: ` +
+                    `${err.message} — falling back to Play()`
+                );
+            }
+        }
+
         return renderer.play();
     }
 
@@ -1701,6 +1728,12 @@ class RaumkernelHelper {
 
         // Brief pause so the device settles to STOPPED before we load again.
         await new Promise(r => setTimeout(r, 500));
+
+        // Clear the stop-guard now that the triggered-by-stop STOPPED event has
+        // been processed.  This allows the auto-restart logic to react if the
+        // upcoming loadSingle also fails (TRANSITIONING → STOPPED); without this
+        // the _userInitiatedStop flag would suppress the retry for 10 seconds.
+        room._userInitiatedStop = null;
 
         const refId   = room._radioRefId;
         const avtMeta = this._stampDurabilityExpired(room._radioAvtMetadata || '');
