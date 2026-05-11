@@ -694,18 +694,19 @@ class RaumkernelHelper {
             // This covers corrupted device state (e.g. a previous BendAVTransportURI call
             // that left the AVTransportURI pointing at an OPML endpoint instead of a proper
             // content-directory reference).  The device stays stuck forever unless we
-            // intervene.  After 60 s with no progress, force a full station reload.
-            // 60 s is chosen because slow TuneIn connections can legitimately take
-            // 30-50 s to resolve a stream URL before reaching PLAYING; firing too
-            // early (e.g. at 30 s) would interrupt a load that would have succeeded.
+            // intervene.  After 90 s with no progress, force a full station reload.
+            // 90 s is chosen because a TuneIn ebrowse call when the server is throttled
+            // can legitimately take 40-60 s to respond; the previous 60 s limit was
+            // firing prematurely, adding an extra ebrowse call before the first one
+            // had time to complete — which maintained TuneIn's rate-limiter.
             if (currState === 'TRANSITIONING' && room._isLiveStream === true) {
-                if (!room._stuckTransitionTimer && (room._autoRestartAttempts ?? 0) < 5) {
+                if (!room._stuckTransitionTimer && (room._autoRestartAttempts ?? 0) < 3) {
                     room._stuckTransitionTimer = setTimeout(() => {
                         room._stuckTransitionTimer = null;
                         this._recoverStuckTransition(room).catch(err =>
                             console.warn(`${LOG_PREFIX.COMMAND} Stuck-transition recovery failed for ${room.name}: ${err.message}`)
                         );
-                    }, 60000);
+                    }, 90000);
                 }
             } else if (prevState === 'TRANSITIONING' && room._stuckTransitionTimer) {
                 // Left TRANSITIONING (to PLAYING, STOPPED, etc.) — cancel the watchdog
@@ -746,7 +747,15 @@ class RaumkernelHelper {
                 const wasFailedLoad    = prevState === 'TRANSITIONING' &&
                     room._preTransitionState !== 'PLAYING';
 
-                if ((wasSessionExpiry || wasFailedLoad) && !userStopped && attempts < 5) {
+                // Honour the TuneIn cooldown period: after several consecutive restart
+                // failures the kernel/TuneIn is in a throttle cascade where every new
+                // ebrowse call returns a shorter TTL, causing the next drop sooner.
+                // Cooldown suppresses all restart attempts for 2 minutes so TuneIn's
+                // rate-limiter has time to reset; a single retry is auto-scheduled.
+                const inCooldown = room._restartCooldownUntil &&
+                    Date.now() < room._restartCooldownUntil;
+
+                if ((wasSessionExpiry || wasFailedLoad) && !userStopped && attempts < 3 && !inCooldown) {
                     // Debounce: cancel any previously scheduled restart for this room
                     if (room._radioRestartTimer) {
                         clearTimeout(room._radioRestartTimer);
@@ -779,9 +788,30 @@ class RaumkernelHelper {
                     }, restartDelay);
                     const reason = wasFailedLoad ? 'failed to start' : 'session expired';
                     const ageStr = room._lastPlayingTime ? `${Math.round(sessionAge / 1000)}s` : '?';
-                    console.log(`${LOG_PREFIX.COMMAND} Stream ${reason} for ${room.name} (attempt ${attempts + 1}/5, session ${ageStr}) — restart in ${restartDelay} ms`);
-                } else if (attempts >= 5) {
-                    console.warn(`${LOG_PREFIX.COMMAND} Auto-restart limit reached for ${room.name} — giving up`);
+                    console.log(`${LOG_PREFIX.COMMAND} Stream ${reason} for ${room.name} (attempt ${attempts + 1}/3, session ${ageStr}) — restart in ${restartDelay} ms`);
+                } else if ((attempts >= 3 || inCooldown) && (wasSessionExpiry || wasFailedLoad) && !userStopped) {
+                    if (!inCooldown) {
+                        // Entering cooldown: 3 consecutive failures indicate TuneIn throttle
+                        // cascade.  Stop all restarts for 2 minutes so TuneIn's rate-limiter
+                        // can reset; schedule a single automatic retry after the cooldown.
+                        room._restartCooldownUntil = Date.now() + 120000;
+                        if (room._radioRestartTimer) {
+                            clearTimeout(room._radioRestartTimer);
+                            room._radioRestartTimer = null;
+                        }
+                        room._radioRestartTimer = setTimeout(() => {
+                            room._radioRestartTimer = null;
+                            room._restartCooldownUntil = null;
+                            room._autoRestartAttempts = 0;
+                            this._autoRestartRadio(room).catch(err =>
+                                console.warn(`${LOG_PREFIX.COMMAND} Radio post-cooldown restart failed for ${room.name}: ${err.message}`)
+                            );
+                        }, 120000);
+                        console.warn(`${LOG_PREFIX.COMMAND} TuneIn throttle cascade detected for ${room.name} — 2 min cooldown, retry scheduled`);
+                    } else {
+                        const remaining = Math.round((room._restartCooldownUntil - Date.now()) / 1000);
+                        console.log(`${LOG_PREFIX.COMMAND} Cooldown active for ${room.name} (${remaining}s remaining) — skip restart`);
+                    }
                 } else if (!wasSessionExpiry && !wasFailedLoad) {
                     console.log(`${LOG_PREFIX.COMMAND} Stream stopped for ${room.name} (user-initiated via PLAYING→TRANSITIONING→STOPPED) — no auto-restart`);
                 }
@@ -1214,6 +1244,14 @@ class RaumkernelHelper {
             room._radioRefId &&
             typeof renderer.loadSingle === 'function') {
             try {
+                // User explicitly pressed Play — override any active cooldown so they
+                // are not left waiting 2 minutes when they want to restart manually.
+                room._restartCooldownUntil = null;
+                room._autoRestartAttempts  = 0;
+                if (room._radioRestartTimer) {
+                    clearTimeout(room._radioRestartTimer);
+                    room._radioRestartTimer = null;
+                }
                 const avtMeta = this._stampDurabilityExpired(room._radioAvtMetadata || '');
                 console.log(
                     `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→fresh session) for ` +
@@ -1240,6 +1278,14 @@ class RaumkernelHelper {
             room._radioRefId &&
             typeof renderer.loadSingle === 'function') {
             try {
+                // User explicitly pressed Play on a stuck room — clear cooldown so
+                // the manual action takes effect immediately.
+                room._restartCooldownUntil = null;
+                room._autoRestartAttempts  = 0;
+                if (room._radioRestartTimer) {
+                    clearTimeout(room._radioRestartTimer);
+                    room._radioRestartTimer = null;
+                }
                 console.log(
                     `${LOG_PREFIX.COMMAND} play() live stream (TRANSITIONING→stop+reload) for ` +
                     `${room.name}`
@@ -1645,6 +1691,11 @@ class RaumkernelHelper {
             // of the *previous* stream.
             room._userInitiatedStop     = Date.now();
             room._autoRestartAttempts   = 0;
+            room._restartCooldownUntil  = null; // User-initiated load clears any cooldown
+            if (room._radioRestartTimer) {
+                clearTimeout(room._radioRestartTimer);
+                room._radioRestartTimer = null;
+            }
             if (room._stuckTransitionTimer) {
                 clearTimeout(room._stuckTransitionTimer);
                 room._stuckTransitionTimer = null;
@@ -1671,9 +1722,14 @@ class RaumkernelHelper {
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime    = Date.now();
             room._resumeAnchorTrack   = undefined;
-            room._isLiveStream        = undefined;
-            room._userInitiatedStop   = Date.now(); // Suppress false auto-restart
-            room._autoRestartAttempts = 0;
+            room._isLiveStream          = undefined;
+            room._userInitiatedStop     = Date.now(); // Suppress false auto-restart
+            room._autoRestartAttempts   = 0;
+            room._restartCooldownUntil  = null; // User-initiated load clears any cooldown
+            if (room._radioRestartTimer) {
+                clearTimeout(room._radioRestartTimer);
+                room._radioRestartTimer = null;
+            }
             if (room._stuckTransitionTimer) {
                 clearTimeout(room._stuckTransitionTimer);
                 room._stuckTransitionTimer = null;
@@ -1701,10 +1757,15 @@ class RaumkernelHelper {
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime    = Date.now();
             room._resumeAnchorTrack   = undefined;
-            room._isLiveStream        = undefined;
-            room._radioAvtMetadata    = undefined;
-            room._userInitiatedStop   = Date.now(); // Suppress false auto-restart
-            room._autoRestartAttempts = 0;
+            room._isLiveStream          = undefined;
+            room._radioAvtMetadata      = undefined;
+            room._userInitiatedStop     = Date.now(); // Suppress false auto-restart
+            room._autoRestartAttempts   = 0;
+            room._restartCooldownUntil  = null; // User-initiated load clears any cooldown
+            if (room._radioRestartTimer) {
+                clearTimeout(room._radioRestartTimer);
+                room._radioRestartTimer = null;
+            }
             if (room._stuckTransitionTimer) {
                 clearTimeout(room._stuckTransitionTimer);
                 room._stuckTransitionTimer = null;
@@ -1734,8 +1795,35 @@ class RaumkernelHelper {
         const actualState = renderer.rendererState?.TransportState;
         if (actualState !== 'TRANSITIONING') return;
 
-        if ((room._autoRestartAttempts ?? 0) >= 5) {
-            console.warn(`${LOG_PREFIX.COMMAND} Stuck-transition retry limit for ${room.name} — giving up`);
+        // Honour the cooldown set by the STOPPED handler when a throttle cascade is detected.
+        // During cooldown, stop the stuck device (gives HA a clean STOPPED state) but don't
+        // fire another ebrowse call — that would only extend the throttle.
+        if (room._restartCooldownUntil && Date.now() < room._restartCooldownUntil) {
+            const remaining = Math.round((room._restartCooldownUntil - Date.now()) / 1000);
+            console.log(`${LOG_PREFIX.COMMAND} Cooldown active for ${room.name} (${remaining}s) — stopping stuck device, no reload`);
+            room._userInitiatedStop = Date.now();
+            try { await renderer.stop(); } catch (_) { /* best-effort */ }
+            return;
+        }
+
+        if ((room._autoRestartAttempts ?? 0) >= 3) {
+            // Cap reached in stuck-transition path — enter cooldown and stop the device.
+            room._restartCooldownUntil = Date.now() + 120000;
+            if (room._radioRestartTimer) {
+                clearTimeout(room._radioRestartTimer);
+                room._radioRestartTimer = null;
+            }
+            room._radioRestartTimer = setTimeout(() => {
+                room._radioRestartTimer = null;
+                room._restartCooldownUntil = null;
+                room._autoRestartAttempts = 0;
+                this._autoRestartRadio(room).catch(err =>
+                    console.warn(`${LOG_PREFIX.COMMAND} Radio post-cooldown restart failed for ${room.name}: ${err.message}`)
+                );
+            }, 120000);
+            console.warn(`${LOG_PREFIX.COMMAND} TuneIn throttle cascade detected for ${room.name} — 2 min cooldown, retry scheduled`);
+            room._userInitiatedStop = Date.now();
+            try { await renderer.stop(); } catch (_) { /* best-effort */ }
             return;
         }
         room._autoRestartAttempts = (room._autoRestartAttempts ?? 0) + 1;
