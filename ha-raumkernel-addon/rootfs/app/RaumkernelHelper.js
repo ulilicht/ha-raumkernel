@@ -676,9 +676,18 @@ class RaumkernelHelper {
             }
 
             // Reset the retry counter whenever we reach PLAYING — the stream is healthy.
+            // Only record the session-start timestamp on the TRANSITION into PLAYING
+            // (prevState !== 'PLAYING').  _extractNowPlaying is called for every room
+            // on every rendererStateChanged event (including CurrentTrackMetaData song-
+            // title updates while already PLAYING), so without this guard _lastPlayingTime
+            // would be reset to "now" every ~60 s as song titles change.  That makes
+            // sessionAge appear artificially short (<90 s) and triggers the 5 s throttle-
+            // backoff even for healthy long-running sessions.
             if (currState === 'PLAYING') {
                 room._autoRestartAttempts = 0;
-                room._lastPlayingTime = Date.now();
+                if (prevState !== 'PLAYING') {
+                    room._lastPlayingTime = Date.now();
+                }
             }
 
             // Detect streams stuck in TRANSITIONING.
@@ -769,7 +778,8 @@ class RaumkernelHelper {
                         );
                     }, restartDelay);
                     const reason = wasFailedLoad ? 'failed to start' : 'session expired';
-                    console.log(`${LOG_PREFIX.COMMAND} Stream ${reason} for ${room.name} (attempt ${attempts + 1}/5) — restart scheduled in ${restartDelay} ms`);
+                    const ageStr = room._lastPlayingTime ? `${Math.round(sessionAge / 1000)}s` : '?';
+                    console.log(`${LOG_PREFIX.COMMAND} Stream ${reason} for ${room.name} (attempt ${attempts + 1}/5, session ${ageStr}) — restart in ${restartDelay} ms`);
                 } else if (attempts >= 5) {
                     console.warn(`${LOG_PREFIX.COMMAND} Auto-restart limit reached for ${room.name} — giving up`);
                 } else if (!wasSessionExpiry && !wasFailedLoad) {
