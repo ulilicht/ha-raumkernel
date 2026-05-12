@@ -711,6 +711,60 @@ class RaumkernelHelper {
                     console.log(`${LOG_PREFIX.COMMAND} Stream load failed or stopped for ${room.name}`);
                 }
             }
+
+            // ---- TuneIn relay URI cleanup ----------------------------------------
+            // On initial subscription (prevState === undefined) a STOPPED renderer
+            // may still have a raw TuneIn relay URL (opml.radiotime.com/Tune.ashx)
+            // as its persisted AVTransportURI from a previous session.
+            // node-raumkernel's MediaListManager fetches that URI on EVERY
+            // subscription re-establishment (startup + each Device-list change).
+            // Since the Raumfeld Host fires Device-list changes frequently
+            // (e.g. each time Wc-Og's presence automation plays/stops a zone),
+            // these fetches rapidly accumulate as extra TuneIn session requests
+            // on the shared serial (78:a5:04:f1:82:ee), pushing it over TuneIn's
+            // rate limit and causing throttle-induced drops on all rooms.
+            //
+            // Fix: when we detect such a stale TuneIn URI on a STOPPED renderer at
+            // first subscription, we swap it to dlna-playsingle:// by calling
+            // loadSingle() and immediately calling stop() when TRANSITIONING fires.
+            // At TRANSITIONING the kernel has already executed SetAVTransportURI
+            // (so dlna-playsingle:// is persisted) but has not yet opened a CDN
+            // connection, so no audio is played and the stop() is inaudible.
+            // After the swap, MediaListManager resolves dlna-playsingle:// locally
+            // via the Raumfeld MediaServer and never contacts TuneIn again.
+            if (isStopped && prevState === undefined && !room._cleaningTuneInUri) {
+                const currentUri = state.AVTransportURI || '';
+                const tuneInSid = currentUri.match(
+                    /opml\.radiotime\.com\/Tune\.ashx.*?\bsid=(s\d+)\b/
+                );
+                if (tuneInSid) {
+                    const stationId = tuneInSid[1];
+                    room._cleaningTuneInUri = Date.now();
+                    console.log(
+                        `${LOG_PREFIX.COMMAND} Stale TuneIn relay URI on stopped ${room.name} ` +
+                        `(${stationId}) — swapping to dlna-playsingle:// to eliminate ` +
+                        `future MediaListManager TuneIn requests`
+                    );
+                    setImmediate(() => this.loadSingle(room.name, `0/RadioTime/Search/s-${stationId}`));
+                    // Safety: clear the flag after 15 s if TRANSITIONING never fires
+                    setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
+                }
+            }
+
+            // Abort the URI-swap load the instant TRANSITIONING is seen:
+            // SetAVTransportURI has already been applied (new dlna-playsingle://
+            // URI is stored on the renderer) but no CDN connection is open yet.
+            if (currState === 'TRANSITIONING' && room._cleaningTuneInUri) {
+                const cleanupAge = Date.now() - room._cleaningTuneInUri;
+                room._cleaningTuneInUri = 0;
+                if (cleanupAge < 10000) {
+                    console.log(
+                        `${LOG_PREFIX.COMMAND} URI swap complete for ${room.name} — stopping`
+                    );
+                    setImmediate(() => renderer.stop());
+                }
+            }
+            // ----------------------------------------------------------------------
         }
         // --------------------------------------------------------------------------
 
