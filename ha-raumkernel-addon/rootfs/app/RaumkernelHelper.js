@@ -672,19 +672,38 @@ class RaumkernelHelper {
 
             // Log when a live-stream session ends.
             // No auto-restart is issued: the Raumfeld kernel manages its own TuneIn
-            // session renewals internally.  However, when a session was very short
-            // (< 180 s) this indicates TuneIn is throttling the device serial.
-            // The kernel auto-restarts ~28 s after such a drop, making another
-            // ebrowse call that re-throttles TuneIn — a self-sustaining cascade.
+            // session renewals internally.  However, when a session is shorter than
+            // 10 minutes (600 s), we call stop() to cancel the kernel's auto-restart.
             //
-            // Break the cascade: send stop() 2 s after a short drop.  The kernel
-            // interprets an explicit Stop while already stopped as "user wants it
-            // stopped — cancel pending retry".  We guard on TransportState so the
-            // stop() is skipped if the user or kernel has already restarted.
+            // Why 10 minutes?  Two distinct failure modes produce short sessions:
             //
-            // Note: this is stop() while STOPPED (safe).  Calling stop() during
-            // TRANSITIONING (as v1.2.53 did) caused an immediate re-TRANSITIONING
-            // loop — that risk does not apply here.
+            //   1. TuneIn throttling: after rapid reconnections the TuneIn backend
+            //      issues short-lived CDN session tokens (~149–198 s for BR Schlager).
+            //      The kernel auto-restarts ~28 s after each drop → another ebrowse
+            //      call → TuneIn re-throttles → a self-sustaining cascade.
+            //
+            //   2. Mass UPnP subscription renewal failure: the node-raumkernel library
+            //      establishes all subscriptions simultaneously on startup/reconnect
+            //      (all with the same TIMEOUT, so they all expire together ~30 min
+            //      later).  When the Raumfeld Host briefly refuses the simultaneous
+            //      renewal burst (ECONNREFUSED), every device is removed and re-added
+            //      within seconds.  The kernel then auto-restarts all playing rooms at
+            //      once, generating a burst of TuneIn ebrowse calls that throttles the
+            //      serial.  Sessions from reconnection-interrupted streams typically
+            //      measure ~190–250 s — above the old 180 s threshold but still well
+            //      under 10 minutes.
+            //
+            // For both cases: send stop() 2 s after the drop.  The kernel interprets
+            // an explicit Stop while already stopped as "user wants it stopped — cancel
+            // pending retry".  We guard on TransportState so stop() is silently skipped
+            // if the user or kernel has already restarted before the 2 s fires.
+            //
+            // Legitimate un-throttled sessions (KellerStueberl-style, hours long) never
+            // drop under 10 minutes, so the guard does not affect normal playback.
+            //
+            // Note: stop() is safe here because we call it while STOPPED (not during
+            // TRANSITIONING as v1.2.53 did, which caused an immediate re-TRANSITIONING
+            // loop).
             const isStopped = currState === 'STOPPED' || currState === 'NO_MEDIA_PRESENT';
             if (isStopped && room._isLiveStream === true) {
                 if (prevState === 'PLAYING') {
@@ -694,12 +713,12 @@ class RaumkernelHelper {
                         ? `${Math.round(sessionAge / 1000)}s` : '?';
                     console.log(`${LOG_PREFIX.COMMAND} Stream dropped for ${room.name} (session ${ageStr}) — press Play to restart`);
 
-                    if (sessionAge !== undefined && sessionAge < 180000) {
+                    if (sessionAge !== undefined && sessionAge < 600000) {
                         const r2 = this._getRendererForRoom(room);
                         if (r2) {
                             console.log(
                                 `${LOG_PREFIX.COMMAND} Short session (${ageStr}) for ${room.name}` +
-                                ` — stop() in 2 s to cancel kernel auto-restart (TuneIn throttled)`
+                                ` — stop() in 2 s to cancel kernel auto-restart`
                             );
                             setTimeout(() => {
                                 const st = r2.rendererState?.TransportState;
