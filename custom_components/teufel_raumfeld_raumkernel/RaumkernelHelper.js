@@ -1501,6 +1501,31 @@ class RaumkernelHelper {
         const room = this.findRoom(roomIdentifier);
         if (!room) return;
 
+        // TuneIn relay URLs (opml.radiotime.com/Tune.ashx?...&sid=sXXXX) stored as
+        // AVTransportURI persist on a renderer even after the stream stops.  Every
+        // time the integration re-subscribes to AVTransport events — at startup or
+        // after any Raumfeld Host device-list change — node-raumkernel's internal
+        // MediaListManager fetches that URI directly from TuneIn's servers.  That
+        // counts as an extra session request against the shared serial
+        // (78:a5:04:f1:82:ee), pushing it over TuneIn's rate limit and throttling
+        // CDN tokens for ALL rooms including Kueche, even when it is the only room
+        // currently playing.  The native Raumfeld app does not do this — it has no
+        // MediaListManager that polls stored URIs for idle renderers.
+        //
+        // Fix: convert any TuneIn relay URL to a dlna-playsingle:// request via
+        // the RadioTime ContentDirectory path (0/RadioTime/Search/s-{stationId}).
+        // dlna-playsingle:// URIs are resolved locally by the Raumfeld kernel, so
+        // MediaListManager never contacts TuneIn on re-subscription.
+        const tuneInSid = url.match(/opml\.radiotime\.com\/Tune\.ashx.*?\bsid=(s\d+)\b/);
+        if (tuneInSid) {
+            const stationId = tuneInSid[1];
+            console.log(
+                `${LOG_PREFIX.MEDIA} TuneIn relay URL → ContentDirectory for station ` +
+                `${stationId} on ${room.name} (prevents MediaListManager TuneIn requests)`
+            );
+            return this.loadSingle(roomIdentifier, `0/RadioTime/Search/s-${stationId}`);
+        }
+
         let renderer = this._getRendererForRoom(room);
 
         if (!renderer?.loadUri) {
