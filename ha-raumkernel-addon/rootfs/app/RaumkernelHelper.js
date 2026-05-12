@@ -670,19 +670,45 @@ class RaumkernelHelper {
                 room._lastPlayingTime = Date.now();
             }
 
-            // Log when a live-stream session ends so the operator can see it in the
-            // addon log.  No auto-restart is issued: the Raumfeld kernel manages its
-            // own TuneIn session renewals internally and handles the stream lifecycle
-            // without any intervention from this integration.  Calling stop() to abort
-            // the kernel's own TRANSITIONING retry makes things worse — the kernel
-            // immediately fires another retry, creating a rapid-fire cascade.
+            // Log when a live-stream session ends.
+            // No auto-restart is issued: the Raumfeld kernel manages its own TuneIn
+            // session renewals internally.  However, when a session was very short
+            // (< 180 s) this indicates TuneIn is throttling the device serial.
+            // The kernel auto-restarts ~28 s after such a drop, making another
+            // ebrowse call that re-throttles TuneIn — a self-sustaining cascade.
+            //
+            // Break the cascade: send stop() 2 s after a short drop.  The kernel
+            // interprets an explicit Stop while already stopped as "user wants it
+            // stopped — cancel pending retry".  We guard on TransportState so the
+            // stop() is skipped if the user or kernel has already restarted.
+            //
+            // Note: this is stop() while STOPPED (safe).  Calling stop() during
+            // TRANSITIONING (as v1.2.53 did) caused an immediate re-TRANSITIONING
+            // loop — that risk does not apply here.
             const isStopped = currState === 'STOPPED' || currState === 'NO_MEDIA_PRESENT';
             if (isStopped && room._isLiveStream === true) {
                 if (prevState === 'PLAYING') {
-                    const ageStr = room._lastPlayingTime
-                        ? `${Math.round((Date.now() - room._lastPlayingTime) / 1000)}s`
-                        : '?';
+                    const sessionAge = room._lastPlayingTime
+                        ? (Date.now() - room._lastPlayingTime) : undefined;
+                    const ageStr = sessionAge !== undefined
+                        ? `${Math.round(sessionAge / 1000)}s` : '?';
                     console.log(`${LOG_PREFIX.COMMAND} Stream dropped for ${room.name} (session ${ageStr}) — press Play to restart`);
+
+                    if (sessionAge !== undefined && sessionAge < 180000) {
+                        const r2 = this._getRendererForRoom(room);
+                        if (r2) {
+                            console.log(
+                                `${LOG_PREFIX.COMMAND} Short session (${ageStr}) for ${room.name}` +
+                                ` — stop() in 2 s to cancel kernel auto-restart (TuneIn throttled)`
+                            );
+                            setTimeout(() => {
+                                const st = r2.rendererState?.TransportState;
+                                if (st === 'STOPPED' || st === 'NO_MEDIA_PRESENT') {
+                                    r2.stop().catch(() => {});
+                                }
+                            }, 2000);
+                        }
+                    }
                 } else if (prevState === 'TRANSITIONING') {
                     console.log(`${LOG_PREFIX.COMMAND} Stream load failed or stopped for ${room.name}`);
                 }
