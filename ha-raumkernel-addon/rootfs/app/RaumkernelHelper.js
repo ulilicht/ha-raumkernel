@@ -1169,17 +1169,52 @@ class RaumkernelHelper {
             }
         }
 
-        // For live radio streams in STOPPED state: use a bare UPnP Play() command.
-        // The zone renderer already has the dlna-playsingle:// URI loaded; Play() tells
-        // the Raumfeld kernel to restart the stream using its own internal session state.
-        // This mirrors exactly what the kernel does on its own auto-restart (it issues
-        // Play(), not SetAVTransportURI), and TuneIn treats it as a session continuation
-        // rather than a brand-new request — so the response is much faster and the
-        // resulting CDN session is longer-lived.
+        // For live radio streams in STOPPED state, decide how to restart:
+        //
+        // Path A — direct CDN URL (preferred):
+        //   TuneIn throttles new session requests when 2+ unique stations are already
+        //   active on the shared serial (78:a5:04:f1:82:ee).  A 3rd concurrent station
+        //   gets its ebrowse renewal denied in 5–15 minutes, dropping the stream.
+        //   The Raumfeld kernel stores the *actual* CDN URL it was streaming as
+        //   CurrentTrackURI even after the renderer stops.  If that URL is a direct
+        //   HTTPS CDN endpoint (e.g. live.antenne.at, orf-live.ors-shoutcast.at,
+        //   dispatcher.rndfnk.com) — with no session token in the URL — we load it
+        //   directly via SetAVTransportURI, bypassing the TuneIn session machinery
+        //   entirely.  The stream then plays indefinitely, identical to Pool's behaviour.
+        //
+        // Path B — dlna-playsingle:// fallback:
+        //   If no usable CDN URL is available (empty, local proxy, TuneIn relay), fall
+        //   back to a bare UPnP Play() on the existing zone-renderer URI.  The kernel
+        //   will re-establish a TuneIn session internally.
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
+
+            const currentTrackUri = renderer.rendererState?.CurrentTrackURI;
+            const isDirectCdn = typeof currentTrackUri === 'string' &&
+                                currentTrackUri.startsWith('https://') &&
+                                !currentTrackUri.includes('opml.radiotime.com');
+
+            if (isDirectCdn) {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} Reloading ${room.name} from direct CDN URL` +
+                    ` (no TuneIn session slot): ${currentTrackUri}`
+                );
+                this._clearSuppressInterval(room);
+                room._userStopped     = false;
+                room._lastPlayCommandTime  = Date.now();
+                room._resumeAnchorSeconds  = 0;
+                room._resumeAnchorTime     = Date.now();
+                room._resumeAnchorUri      = currentTrackUri;
+                room._resumeAnchorTrack    = undefined;
+                room._radioOriginalUrl     = currentTrackUri;
+                // Keep _isLiveStream = true; we know this is a live radio CDN stream.
+                // Calling renderer.loadUri() directly avoids our wrapper's reset of
+                // _isLiveStream to undefined (which could lose drop detection).
+                return renderer.loadUri(currentTrackUri);
+            }
+
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );
