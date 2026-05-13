@@ -1,3 +1,7 @@
+## 1.2.71
+
+- Fix spurious "Previous" button appearing in HA media player when play is triggered via the integration after the native app had loaded a station via dlna-playsingle://
+
 ## 1.2.13
 
 - Fix track images which are hosted on Raumfeld devices (e.g. Local music, Tidal) not showing up.
