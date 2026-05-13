@@ -1,0 +1,25 @@
+{
+  "name": "app",
+  "version": "1.2.37",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "jsdom": "^28.1.0",
+    "node-raumkernel": "github:ulilicht/node-raumkernel",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^10.0.2",
+    "globals": "^17.0.0"
+  }
+}
