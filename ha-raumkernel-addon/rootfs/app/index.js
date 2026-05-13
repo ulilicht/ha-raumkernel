@@ -1,93 +1,13 @@
 import { WebSocketServer } from 'ws';
-import http, { createServer } from 'http';
-import { EventEmitter } from 'events';
+import { createServer } from 'http';
 import RaumkernelHelper from './RaumkernelHelper.js';
 import IntegrationManager from './IntegrationManager.js';
 
 import fs from 'fs';
-
-// ── TuneIn HTTP intercept ────────────────────────────────────────────────────
-// node-raumkernel's MediaListManager processes AVTransportURI / AVTransportURI-
-// MetaData for every renderer.  When a renderer holds a raw TuneIn relay URL
-// (opml.radiotime.com/Tune.ashx) the MediaListManager issues an HTTP GET to
-// that URL.  TuneIn counts these as new session requests against the shared
-// serial (78:a5:04:f1:82:ee), triggering CDN-token throttle and causing stream
-// drops on playing rooms.
-//
-// The kernel's own ebrowse session renewals are made from the kernel *binary*
-// (a native process), not through Node.js http — so patching http here only
-// suppresses the unwanted MediaListManager fetches, never the renewals.
-(function patchHttpForTuneIn() {
-    const BLOCKED_HOST = 'opml.radiotime.com';
-    const FAKE_BODY = Buffer.from('#EXTM3U\n');
-
-    function isTuneIn(urlOrOpts) {
-        let host = '';
-        if (typeof urlOrOpts === 'string') {
-            try { host = new URL(urlOrOpts).hostname; } catch { /* ignore */ }
-        } else if (urlOrOpts && typeof urlOrOpts === 'object') {
-            host = (urlOrOpts.hostname || urlOrOpts.host || '').split(':')[0];
-        }
-        return host === BLOCKED_HOST;
-    }
-
-    function fakeRequest(callback) {
-        const fakeReq = new EventEmitter();
-        fakeReq.end           = () => fakeReq;
-        fakeReq.write         = () => fakeReq;
-        fakeReq.destroy       = () => {};
-        fakeReq.abort         = () => {};
-        fakeReq.setHeader     = () => {};
-        fakeReq.removeHeader  = () => {};
-        fakeReq.setTimeout    = () => fakeReq;
-        fakeReq.flushHeaders  = () => {};
-        fakeReq.socket        = null;
-        fakeReq.headersSent   = false;
-        setImmediate(() => {
-            const fakeRes = new EventEmitter();
-            fakeRes.statusCode   = 200;
-            fakeRes.statusMessage = 'OK';
-            fakeRes.headers      = { 'content-type': 'audio/x-mpegurl' };
-            fakeRes.httpVersion  = '1.1';
-            fakeRes.destroy = () => {};
-            fakeRes.resume  = () => {};
-            fakeRes.pipe    = () => fakeRes;
-            if (callback) {
-                callback(fakeRes);
-            } else {
-                fakeReq.emit('response', fakeRes);
-            }
-            setImmediate(() => {
-                fakeRes.emit('data', FAKE_BODY);
-                fakeRes.emit('end');
-            });
-        });
-        return fakeReq;
-    }
-
-    const _origRequest = http.request.bind(http);
-    const _origGet     = http.get.bind(http);
-
-    http.request = function patchedRequest(url, options, cb) {
-        const callback = typeof options === 'function' ? options : cb;
-        if (isTuneIn(url)) {
-            console.log('[Command] [TuneIn-Intercept] Blocked http.request → opml.radiotime.com (serial throttle prevented)');
-            return fakeRequest(callback);
-        }
-        return _origRequest(url, options, cb);
-    };
-
-    http.get = function patchedGet(url, options, cb) {
-        const callback = typeof options === 'function' ? options : cb;
-        if (isTuneIn(url)) {
-            console.log('[Command] [TuneIn-Intercept] Blocked http.get → opml.radiotime.com (serial throttle prevented)');
-            const req = fakeRequest(callback);
-            req.end(); // http.get always calls end() automatically
-            return req;
-        }
-        return _origGet(url, options, cb);
-    };
-}());
+// Note: opml.radiotime.com HTTP intercept lives in tunein-patch.cjs,
+// loaded via  node --require ./tunein-patch.cjs  in the service run script.
+// It must be a --require preloader so the patch is in place before
+// node-raumkernel's MediaListManager captures http.get at module load time.
 
 // Run integration install/update check on startup
 const integrationManager = new IntegrationManager();
