@@ -690,26 +690,6 @@ class RaumkernelHelper {
                         room._radioOriginalUrl = undefined;
                         room._radioRefId       = undefined;
                         room._radioAvtMetadata = undefined;
-
-                        // Detect a kernel-initiated dlna-playsingle:// URI swap on a
-                        // STOPPED renderer.  This pattern occurs when the Raumfeld kernel
-                        // internally auto-switches to a different favorites item (e.g.
-                        // because the previous item's TuneIn session context was stale).
-                        // The kernel will reuse that stale session; mark it so we can
-                        // force a fresh SetAVTransportURI the instant PLAYING fires.
-                        const isStopped = state.TransportState === 'STOPPED' ||
-                                          state.TransportState === 'NO_MEDIA_PRESENT';
-                        const bothDlna  = prevAnchorUri?.startsWith('dlna-playsingle://') &&
-                                          currentUri.startsWith('dlna-playsingle://');
-                        if (bothDlna && isStopped && !room._userStopped) {
-                            room._kernelAutoSwitched = Date.now();
-                            console.log(
-                                `${LOG_PREFIX.COMMAND} Kernel URI auto-switch on ${room.name}: ` +
-                                `${prevAnchorUri.slice(-40)} → ${currentUri.slice(-40)}`
-                            );
-                        } else {
-                            room._kernelAutoSwitched = 0;
-                        }
                     }
                     console.log(`${LOG_PREFIX.RENDERER} Track changed for ${room.name}: position tracker reset`);
                 }
@@ -764,9 +744,10 @@ class RaumkernelHelper {
         // the item (obtaining the raumfeld:ebrowse URL from its DIDL-Lite metadata)
         // and handles all TuneIn session renewals without any assistance from us.
         //
-        // Cache _radioRefId and _radioAvtMetadata for informational purposes.
-        // They are no longer passed to loadSingle() in play(); play() now uses a
-        // bare UPnP Play() command so the kernel can reuse its existing session state.
+        // Cache _radioRefId and _radioAvtMetadata for informational purposes only.
+        // play() uses a bare UPnP Play() command so the kernel can reuse its
+        // existing session state — never SetAVTransportURI which would start a new
+        // TuneIn session registration and trigger throttle-induced drops.
         //
         // Sources for the metadata (in priority order):
         //   1. AVTransportURIMetaData — set by the native Raumfeld app when it loads
@@ -790,19 +771,13 @@ class RaumkernelHelper {
             // for "External" streams loaded with a plain CDN URL and no TuneIn
             // context.  Caching that would overwrite good TuneIn metadata with a
             // useless value and break the renewal path.
-            if (isRadio) {
+                if (isRadio) {
                 // Track the last direct CDN URL for this room (sticky — kept even when
                 // the URI later transitions to dlna-playsingle:// so that, when TuneIn
                 // metadata arrives for the same station, we can associate the two).
                 const avturi = state.AVTransportURI || '';
                 if (avturi.startsWith('https://') && !avturi.includes('opml.radiotime.com')) {
                     room._lastSeenCdnUri = avturi;
-                }
-                // Cache dlna-playsingle:// URI so play() can use Path C (fresh TuneIn
-                // session via ContentDirectory lookup) even if AVTransportURI has been
-                // changed to a CDN URL by a previous play attempt.
-                if (avturi.startsWith('dlna-playsingle://')) {
-                    room._lastSeenDlnaUri = avturi;
                 }
 
                 const avtMeta   = state.AVTransportURIMetaData || '';
@@ -841,43 +816,6 @@ class RaumkernelHelper {
                             ` metadata from CDN cache (${room._lastSeenCdnUri})`
                         );
                     }
-                }
-            }
-
-            // Kernel auto-switch recovery (Path D):
-            // When the Raumfeld kernel swapped the dlna-playsingle:// URI on a
-            // STOPPED room (detected above and marked with _kernelAutoSwitched),
-            // the kernel may reuse a stale TuneIn session with an expired CDN URL.
-            // That causes the stream to drop after ~120 s even though TuneIn is
-            // not throttling the station at all — the issue is entirely local.
-            //
-            // As soon as the room enters PLAYING AND we have fresh TuneIn metadata
-            // (with a valid raumfeld:ebrowse URL), send SetAVTransportURI with the
-            // current dlna-playsingle URI and the metadata.  This forces the kernel
-            // to make a new ebrowse call and establish a fresh CDN session —
-            // identical to how the native Raumfeld app loads the same station.
-            // The brief PLAYING→TRANSITIONING→PLAYING cycle (< 3 s) replaces
-            // the ~120 s stale-session window before the inevitable drop.
-            if (isPlaying && room._kernelAutoSwitched) {
-                const switchAge  = Date.now() - room._kernelAutoSwitched;
-                const avturi     = state.AVTransportURI || '';
-                const cachedMeta = room._radioAvtMetadata;
-                const hasMeta    = typeof cachedMeta === 'string' &&
-                                   cachedMeta.includes('<raumfeld:ebrowse>http');
-                if (switchAge < 15000 && avturi.startsWith('dlna-playsingle://') && hasMeta) {
-                    room._kernelAutoSwitched = 0;
-                    const savedUri  = avturi;
-                    const savedMeta = cachedMeta;
-                    console.log(
-                        `${LOG_PREFIX.COMMAND} Session refresh for ${room.name}: ` +
-                        `kernel auto-switched URI; forcing fresh TuneIn session`
-                    );
-                    setImmediate(() => renderer.setAvTransportUri(savedUri, savedMeta));
-                } else if (!hasMeta && switchAge < 15000) {
-                    // Metadata not yet available — flag stays set, will retry on
-                    // the next rendererStateChanged event while still PLAYING.
-                } else {
-                    room._kernelAutoSwitched = 0;  // Clear stale flag
                 }
             }
 
@@ -1375,60 +1313,28 @@ class RaumkernelHelper {
             }
         }
 
-        // For live radio streams in STOPPED state, decide how to restart:
+        // For live radio streams in STOPPED state use a bare UPnP Play().
         //
-        // Path C — dlna-playsingle:// URI + cached TuneIn metadata:
-        //   Call SetAVTransportURI(dlna-playsingle://, cachedMeta).  The kernel
-        //   then performs a ContentDirectory lookup, fetches the <res> TuneIn
-        //   session URL (opml.radiotime.com/Tune.ashx?id=eXXX), which REGISTERS
-        //   A NEW TuneIn SESSION.  TuneIn marks the session active and subsequent
-        //   ebrowse renewal calls at :02 past each minute succeed indefinitely.
-        //   This is identical to what the native Raumfeld app does.
+        // The Raumfeld kernel manages its own TuneIn session continuity.  Sending
+        // SetAVTransportURI (old Path C) registers a NEW TuneIn session which
+        // TuneIn throttles when called repeatedly — each new registration starts
+        // a fresh renewal clock that fires at :02 past each minute.  Back-to-back
+        // registrations (e.g. Play then loadSingle within 30 s) escalate throttle
+        // and cause drops as short as 37 s.
         //
-        //   CDN URL (the old Path A) does NOT work: without a ContentDirectory
-        //   lookup and <res> fetch, no new session is registered with TuneIn.
-        //   TuneIn sees renewal calls for a zombie/expired session and kills it
-        //   after 1–2 cycles (the :02-past-the-minute drop pattern).
+        // A bare Play() tells the kernel to resume using its existing session
+        // context, exactly as the native Raumfeld app does after a kernel-internal
+        // drop.  The kernel handles stale sessions and renewals on its own; even
+        // with durability deeply negative (observed: −240 s) the kernel renews
+        // successfully via its ContentDirectory subscription without any help.
         //
-        //   The "Previous" button is suppressed by always reporting canPlayPrev=false
-        //   for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
-        //
-        // Path B — bare Play() fallback:
-        //   If no dlna-playsingle:// URI is available (e.g. device state was
-        //   corrupted by an old CDN-URL restart), fall back to bare UPnP Play()
-        //   and let the kernel attempt its own session recovery.
+        // The "Previous" button is suppressed by always reporting canPlayPrev=false
+        // for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
 
-            const cachedMeta    = room._radioAvtMetadata;
-            const hasTuneInMeta = typeof cachedMeta === 'string' &&
-                                  cachedMeta.includes('<raumfeld:ebrowse>http');
-
-            // Path C — dlna-playsingle:// triggers ContentDirectory lookup → fresh TuneIn session
-            const avTransportUri = renderer.rendererState?.AVTransportURI || '';
-            const dlnaUri = avTransportUri.startsWith('dlna-playsingle://')
-                ? avTransportUri
-                : room._lastSeenDlnaUri;
-            if (dlnaUri && hasTuneInMeta) {
-                console.log(
-                    `${LOG_PREFIX.COMMAND} Reloading ${room.name} via dlna-playsingle` +
-                    ` (fresh TuneIn session): ...${dlnaUri.slice(-50)}`
-                );
-                this._clearSuppressInterval(room);
-                room._userStopped          = false;
-                room._lastPlayCommandTime  = Date.now();
-                room._resumeAnchorSeconds  = 0;
-                room._resumeAnchorTime     = Date.now();
-                room._resumeAnchorUri      = dlnaUri;
-                room._resumeAnchorTrack    = undefined;
-                room._radioOriginalUrl     = dlnaUri;
-                return renderer.setAvTransportUri(dlnaUri, cachedMeta);
-            }
-
-            // Path B — bare Play() last resort:
-            //   No dlna-playsingle:// URI known. Let the kernel handle it.
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );

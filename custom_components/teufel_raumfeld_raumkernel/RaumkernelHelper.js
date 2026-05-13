@@ -668,9 +668,10 @@ class RaumkernelHelper {
         // the item (obtaining the raumfeld:ebrowse URL from its DIDL-Lite metadata)
         // and handles all TuneIn session renewals without any assistance from us.
         //
-        // Cache _radioRefId and _radioAvtMetadata for informational purposes.
-        // They are no longer passed to loadSingle() in play(); play() now uses a
-        // bare UPnP Play() command so the kernel can reuse its existing session state.
+        // Cache _radioRefId and _radioAvtMetadata for informational purposes only.
+        // play() uses a bare UPnP Play() command so the kernel can reuse its
+        // existing session state — never SetAVTransportURI which would start a new
+        // TuneIn session registration and trigger throttle-induced drops.
         //
         // Sources for the metadata (in priority order):
         //   1. AVTransportURIMetaData — set by the native Raumfeld app when it loads
@@ -696,12 +697,6 @@ class RaumkernelHelper {
             // useless value and break the renewal path.
             if (isRadio) {
                 const avturi  = state.AVTransportURI || '';
-                // Cache dlna-playsingle:// URI so play() can use Path C (fresh TuneIn
-                // session via ContentDirectory lookup) even if AVTransportURI has been
-                // changed to a CDN URL by a previous play attempt.
-                if (avturi.startsWith('dlna-playsingle://')) {
-                    room._lastSeenDlnaUri = avturi;
-                }
                 const avtMeta   = state.AVTransportURIMetaData || '';
                 const trackMeta = state.CurrentTrackMetaData  || '';
                 const hasRealEbrowse = (m) => m.includes('<raumfeld:ebrowse>http');
@@ -1211,60 +1206,28 @@ class RaumkernelHelper {
             }
         }
 
-        // For live radio streams in STOPPED state, decide how to restart:
+        // For live radio streams in STOPPED state use a bare UPnP Play().
         //
-        // Path C — dlna-playsingle:// URI + cached TuneIn metadata:
-        //   Call SetAVTransportURI(dlna-playsingle://, cachedMeta).  The kernel
-        //   then performs a ContentDirectory lookup, fetches the <res> TuneIn
-        //   session URL (opml.radiotime.com/Tune.ashx?id=eXXX), which REGISTERS
-        //   A NEW TuneIn SESSION.  TuneIn marks the session active and subsequent
-        //   ebrowse renewal calls at :02 past each minute succeed indefinitely.
-        //   This is identical to what the native Raumfeld app does.
+        // The Raumfeld kernel manages its own TuneIn session continuity.  Sending
+        // SetAVTransportURI (old Path C) registers a NEW TuneIn session which
+        // TuneIn throttles when called repeatedly — each new registration starts
+        // a fresh renewal clock that fires at :02 past each minute.  Back-to-back
+        // registrations (e.g. Play then loadSingle within 30 s) escalate throttle
+        // and cause drops as short as 37 s.
         //
-        //   CDN URL (the old Path A) does NOT work: without a ContentDirectory
-        //   lookup and <res> fetch, no new session is registered with TuneIn.
-        //   TuneIn sees renewal calls for a zombie/expired session and kills it
-        //   after 1–2 cycles (the :02-past-the-minute drop pattern).
+        // A bare Play() tells the kernel to resume using its existing session
+        // context, exactly as the native Raumfeld app does after a kernel-internal
+        // drop.  The kernel handles stale sessions and renewals on its own; even
+        // with durability deeply negative (observed: −240 s) the kernel renews
+        // successfully via its ContentDirectory subscription without any help.
         //
-        //   The "Previous" button is suppressed by always reporting canPlayPrev=false
-        //   for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
-        //
-        // Path B — bare Play() fallback:
-        //   If no dlna-playsingle:// URI is available (e.g. device state was
-        //   corrupted by an old CDN-URL restart), fall back to bare UPnP Play()
-        //   and let the kernel attempt its own session recovery.
+        // The "Previous" button is suppressed by always reporting canPlayPrev=false
+        // for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
 
-            const cachedMeta    = room._radioAvtMetadata;
-            const hasTuneInMeta = typeof cachedMeta === 'string' &&
-                                  cachedMeta.includes('<raumfeld:ebrowse>http');
-
-            // Path C — dlna-playsingle:// triggers ContentDirectory lookup → fresh TuneIn session
-            const avTransportUri = renderer.rendererState?.AVTransportURI || '';
-            const dlnaUri = avTransportUri.startsWith('dlna-playsingle://')
-                ? avTransportUri
-                : room._lastSeenDlnaUri;
-            if (dlnaUri && hasTuneInMeta) {
-                console.log(
-                    `${LOG_PREFIX.COMMAND} Reloading ${room.name} via dlna-playsingle` +
-                    ` (fresh TuneIn session): ...${dlnaUri.slice(-50)}`
-                );
-                this._clearSuppressInterval(room);
-                room._userStopped          = false;
-                room._lastPlayCommandTime  = Date.now();
-                room._resumeAnchorSeconds  = 0;
-                room._resumeAnchorTime     = Date.now();
-                room._resumeAnchorUri      = dlnaUri;
-                room._resumeAnchorTrack    = undefined;
-                room._radioOriginalUrl     = dlnaUri;
-                return renderer.setAvTransportUri(dlnaUri, cachedMeta);
-            }
-
-            // Path B — bare Play() last resort:
-            //   No dlna-playsingle:// URI known. Let the kernel handle it.
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );
