@@ -1230,7 +1230,7 @@ class RaumkernelHelper {
                 room._resumeAnchorTime     = Date.now();
                 room._resumeAnchorUri      = currentAvtUri;
                 room._resumeAnchorTrack    = undefined;
-                return renderer.setAvTransportUri(currentAvtUri, this._expireDurability(cachedMeta));
+                return renderer.setAvTransportUri(currentAvtUri, cachedMeta);
             }
 
             // Path A — CDN URL + cached TuneIn metadata (when AVTransportURI is a
@@ -1754,14 +1754,6 @@ class RaumkernelHelper {
      * @param {string} metaXml  DIDL-Lite XML (may be empty)
      * @returns {string}  XML with durability replaced by 0, or original if no match
      */
-    _expireDurability(metaXml) {
-        if (!metaXml) return metaXml;
-        return metaXml.replace(
-            /<raumfeld:durability>[^<]*<\/raumfeld:durability>/g,
-            '<raumfeld:durability>0</raumfeld:durability>'
-        );
-    }
-
     /**
      * Wakes up all physical renderers in a virtual renderer
      * Only wakes devices that are actually in standby

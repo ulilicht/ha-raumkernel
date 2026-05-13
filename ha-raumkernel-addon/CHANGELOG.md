@@ -1,7 +1,3 @@
-## 1.2.72
-
-- Fix stream dropping after ~39 s when restarting a previously-stopped TuneIn radio via HA: the cached metadata was sent with `durability=120`, causing the kernel to reuse an already-expired CDN URL instead of calling ebrowse for a fresh one. Durability is now zeroed before the dlna-playsingle:// handoff so the kernel always fetches a fresh session URL.
-
 ## 1.2.71
 
 - Fix spurious "Previous" button appearing in HA media player when play is triggered via the integration after the native app had loaded a station via dlna-playsingle://
