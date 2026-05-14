@@ -1325,22 +1325,29 @@ class RaumkernelHelper {
         //   it never issues bare Play() on a dlna-playsingle:// URI after a drop.
         //
         // Why Path A works:
-        //   SetAVTransportURI with the raw CDN URL (no ebrowse/durability in the
-        //   metadata) tells the kernel to stream that URL without involving TuneIn
-        //   at all.  No session registration, no renewal clock, no throttle risk.
-        //   The kernel plays the CDN stream indefinitely.
+        //   SetAVTransportURI with the CDN URL + cached station metadata (which
+        //   includes raumfeld:ebrowse but has <res> stripped) reuses the existing
+        //   TuneIn session: no new session registration, and the kernel handles
+        //   renewal via ebrowse exactly as it would during normal playback.
+        //
+        //   Crucially, _radioAvtMetadata retains raumfeld:ebrowse and
+        //   raumfeld:durability — do NOT strip them here.  Without ebrowse the
+        //   kernel cannot renew the TuneIn CDN session, and the CDN closes the
+        //   connection once the initial token expires (~8 min for dispatcher.rndfnk
+        //   URLs tagged ?aggregator=tunein).
         //
         // The CDN URL is read from CurrentTrackURI which the Raumfeld renderer
         // retains across PLAYING→STOPPED transitions.
         //
-        // Path B (bare Play) remains as fallback when no CDN URL is cached yet
-        // (e.g. very first play after a cold start before any stream has played).
+        // Path B (bare Play) remains as fallback when no CDN URL or cached
+        // metadata is available (very first play after a cold start).
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
 
-            // Path A — CDN URL + station metadata (ebrowse/durability stripped).
+            // Path A — CDN URL + station metadata (ebrowse/durability preserved,
+            //           <res> already stripped by the stateChanged cache logic).
             const currentTrackUri = renderer.rendererState?.CurrentTrackURI;
             const isDirectCdn = typeof currentTrackUri === 'string' &&
                                 currentTrackUri.startsWith('https://') &&
@@ -1359,13 +1366,10 @@ class RaumkernelHelper {
                 room._resumeAnchorTime    = Date.now();
                 room._resumeAnchorUri     = currentTrackUri;
                 room._resumeAnchorTrack   = undefined;
-                return renderer.setAvTransportUri(
-                    currentTrackUri,
-                    this._stripEbrowse(cachedMeta)
-                );
+                return renderer.setAvTransportUri(currentTrackUri, cachedMeta);
             }
 
-            // Path B — bare Play() fallback: no CDN URL available yet.
+            // Path B — bare Play() fallback: no CDN URL or metadata available.
             // The kernel handles session re-establishment on its own.
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
