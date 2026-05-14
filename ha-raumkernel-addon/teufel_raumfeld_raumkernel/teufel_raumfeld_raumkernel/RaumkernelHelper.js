@@ -99,7 +99,8 @@ const LOG_PREFIX = {
 // Path to the on-disk cache that maps CDN stream URL → TuneIn DIDL-Lite metadata.
 // Survives add-on restarts; used to warm the metadata cache on cold starts where
 // the renderer was left with External/corrupt metadata by a previous run.
-const CDN_META_CACHE_FILE = '/data/radio_metadata_cache.json';
+const CDN_META_CACHE_FILE  = '/data/radio_metadata_cache.json';
+const BROWSE_CACHE_FILE    = '/data/browse_cache.json';
 
 // ============================================================================
 // MAIN CLASS
@@ -146,6 +147,25 @@ class RaumkernelHelper {
          * @type {Map<string, Array>}
          */
         this._browseCache = new Map();
+
+        // Load browse cache from disk so the very first Browse request after a
+        // restart is served from cache without hitting the kernel.
+        // (Hitting the kernel triggers ebrowse for all TuneIn stations in the
+        // container, which can throttle TuneIn sessions and cause stream drops.)
+        try {
+            if (existsSync(BROWSE_CACHE_FILE)) {
+                const data = JSON.parse(readFileSync(BROWSE_CACHE_FILE, 'utf8'));
+                let loaded = 0;
+                for (const [objectId, items] of Object.entries(data)) {
+                    if (Array.isArray(items)) { this._browseCache.set(objectId, items); loaded++; }
+                }
+                if (loaded > 0) {
+                    console.log(`[Browse] Loaded ${loaded} container(s) from disk cache`);
+                }
+            }
+        } catch (err) {
+            console.warn(`[Browse] Failed to load browse cache from disk: ${err.message}`);
+        }
 
         this._setupLogging();
         this._setupEventHandlers();
@@ -623,6 +643,43 @@ class RaumkernelHelper {
         return metaXml
             .replace(/<raumfeld:durability>[^<]*<\/raumfeld:durability>/g, '')
             .replace(/<raumfeld:ebrowse>[^<]*<\/raumfeld:ebrowse>/g, '');
+    }
+
+    /**
+     * Strips ALL TuneIn / RadioTime session-management markers from DIDL-Lite
+     * metadata so the Raumfeld kernel treats the CDN URL as a standalone audio
+     * stream — no ContentDirectory lookup, no ebrowse scheduling, no TuneIn
+     * rate-limit exposure.
+     *
+     * Beyond the ebrowse/durability fields removed by _stripEbrowse(), this
+     * also removes:
+     *   • refID attribute — the kernel follows this to look up the station's
+     *     ContentDirectory entry, which contains the ebrowse URL; removing it
+     *     severs that path.
+     *   • raumfeld:section="RadioTime" — signals the kernel that this is a
+     *     TuneIn station managed by the RadioTime ContentDirectory; removing
+     *     it stops the kernel from treating the play session as TuneIn-managed.
+     *   • raumfeld:name — purely display; redundant without section.
+     *   • item id / parentID are neutralised to "cdn/direct" / "cdn" so the
+     *     kernel cannot find the item in its ContentDirectory even via id lookup.
+     *
+     * Use this for PERMANENT CDN URLs (direct broadcaster streams that never
+     * expire).  TuneIn dispatcher URLs (rndfnk / aggregator=tunein) must keep
+     * their ebrowse metadata for renewal — use _stripEbrowse() for those.
+     *
+     * @param {string} metaXml - DIDL-Lite XML string
+     * @returns {string} XML suitable for SetAVTransportURI on a permanent CDN URL
+     */
+    _makeCdnMeta(metaXml) {
+        if (!metaXml) return metaXml;
+        return metaXml
+            .replace(/<raumfeld:durability>[^<]*<\/raumfeld:durability>/g, '')
+            .replace(/<raumfeld:ebrowse>[^<]*<\/raumfeld:ebrowse>/g, '')
+            .replace(/<raumfeld:section>[^<]*<\/raumfeld:section>/g, '')
+            .replace(/<raumfeld:name>[^<]*<\/raumfeld:name>/g, '')
+            .replace(/\s+refID="[^"]*"/g, '')
+            .replace(/\bid="[^"]*"/g, 'id="cdn/direct"')
+            .replace(/\bparentID="[^"]*"/g, 'parentID="cdn"');
     }
 
     /**
@@ -1502,11 +1559,66 @@ class RaumkernelHelper {
                 room._resumeAnchorTime    = Date.now();
                 room._resumeAnchorUri     = currentTrackUri;
                 room._resumeAnchorTrack   = undefined;
-                return renderer.setAvTransportUri(currentTrackUri, effectiveMeta);
+                // Permanent CDN URLs (direct broadcaster streams like orf-live.ors-shoutcast.at)
+                // never expire so we pass fully de-TuneIn'd metadata (_makeCdnMeta):
+                //   • strips ebrowse / durability (no renewal scheduling)
+                //   • strips refID / raumfeld:section (kernel cannot follow these to
+                //     look up the station's ebrowse URL in its ContentDirectory)
+                //   • neutralises item id/parentID (no ContentDirectory id lookup)
+                // Without any TuneIn reference the kernel plays the CDN URL as a
+                // plain audio stream — no ebrowse calls, no TuneIn rate-limit hits,
+                // stream plays indefinitely until the CDN itself disconnects.
+                // TuneIn dispatcher CDN URLs (rndfnk / aggregator=tunein) do require
+                // periodic renewal and must keep their full ebrowse metadata.
+                const isPermanentCdn = !currentTrackUri.includes('rndfnk') &&
+                                       !currentTrackUri.includes('aggregator=tunein');
+                const metaForRestart = isPermanentCdn
+                    ? this._makeCdnMeta(effectiveMeta)
+                    : effectiveMeta;
+                return renderer.setAvTransportUri(currentTrackUri, metaForRestart);
             }
 
             // Path B — bare Play() fallback: no CDN URL or metadata available.
-            // The kernel handles session re-establishment on its own.
+            //
+            // Before resorting to a bare Play(), try to use the last-seen CDN URL
+            // (room._lastSeenCdnUri, captured whenever AVTransportURI is an HTTPS
+            // CDN address) together with fully de-TuneIn'd metadata (_makeCdnMeta).
+            //
+            // Why this matters: bare Play() on a renderer whose AVTransportURIMetaData
+            // still carries refID / raumfeld:section="RadioTime" causes the kernel to
+            // look up the station in its ContentDirectory, find the ebrowse URL, and
+            // manage a TuneIn session.  If the TuneIn serial is already throttled by
+            // concurrent ebrowse calls from other rooms playing the same station, the
+            // session gets a short durability (e.g. 37.6 s).  After 37.6 + 120 = 157 s
+            // the session expires and the stream stops — the recurring ~157 s drop
+            // pattern observed when multiple rooms play the same TuneIn station.
+            //
+            // SetAVTransportURI with _makeCdnMeta metadata instead severs every
+            // ContentDirectory link (no refID, no RadioTime section), so the kernel
+            // plays the CDN stream directly without any TuneIn session management.
+            // The CDN URL itself never expires for permanent broadcaster streams
+            // (e.g. orf-live.ors-shoutcast.at) — the stream continues indefinitely.
+            const fallbackCdnUri = room._lastSeenCdnUri;
+            const fallbackMeta   = fallbackCdnUri
+                ? this._makeCdnMeta(room._radioAvtMetadata)
+                : null;
+            if (fallbackCdnUri && fallbackMeta) {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→CDN-direct) for ${room.name}:` +
+                    ` ${fallbackCdnUri}`
+                );
+                this._clearSuppressInterval(room);
+                room._userStopped         = false;
+                room._lastPlayCommandTime = Date.now();
+                room._resumeAnchorSeconds = 0;
+                room._resumeAnchorTime    = Date.now();
+                room._resumeAnchorUri     = fallbackCdnUri;
+                room._resumeAnchorTrack   = undefined;
+                return renderer.setAvTransportUri(fallbackCdnUri, fallbackMeta);
+            }
+
+            // Final fallback: bare Play() — let the kernel handle session
+            // re-establishment (used only when no CDN URL is known at all).
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );
@@ -1571,7 +1683,10 @@ class RaumkernelHelper {
                     room._resumeAnchorTime    = Date.now();
                     room._resumeAnchorUri     = currentTrackUri;
                     room._resumeAnchorTrack   = undefined;
-                    return renderer.setAvTransportUri(currentTrackUri, cachedMeta);
+                    const isPermanentCdnEc = !currentTrackUri.includes('rndfnk') &&
+                                             !currentTrackUri.includes('aggregator=tunein');
+                    const metaEc = isPermanentCdnEc ? this._makeCdnMeta(cachedMeta) : cachedMeta;
+                    return renderer.setAvTransportUri(currentTrackUri, metaEc);
                 }
             }
             throw err;
@@ -2132,6 +2247,11 @@ class RaumkernelHelper {
             const items = this._parseBrowseResponse(response);
             this._browseCache.set(objectId, items);
             console.log(`${LOG_PREFIX.BROWSE} Cached ${items.length} items for ${objectId}`);
+            // Persist to disk so addon restarts are served from cache (no kernel hit).
+            try {
+                const obj = Object.fromEntries(this._browseCache.entries());
+                writeFileSync(BROWSE_CACHE_FILE, JSON.stringify(obj, null, 2), 'utf8');
+            } catch (_) { /* best-effort */ }
             return items;
         } catch (err) {
             console.error(`${LOG_PREFIX.BROWSE} Error browsing ${objectId}: ${err.message}`);
@@ -2150,6 +2270,7 @@ class RaumkernelHelper {
         const count = this._browseCache.size;
         this._browseCache.clear();
         console.log(`${LOG_PREFIX.BROWSE} Browse cache cleared (${count} entries removed)`);
+        try { writeFileSync(BROWSE_CACHE_FILE, '{}', 'utf8'); } catch (_) { /* best-effort */ }
     }
 
     /**

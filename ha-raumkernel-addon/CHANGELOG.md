@@ -1,3 +1,32 @@
+## 1.2.93
+
+- Fix (recurring ~157 s stream drop — multi-room TuneIn session throttling):
+  When multiple rooms (Sauna, Kati, Bad, Kueche) all have the same TuneIn station
+  as their last-played item, the Raumfeld kernel calls `ebrowse` for each room at
+  startup.  This burst of concurrent ebrowse calls exceeds TuneIn's per-serial
+  rate limit, causing the kernel to receive a throttled session with
+  `durability=37.6 s`.  After 37.6 + 120 = **157.6 s** the throttled session
+  expires and the stream stops — regardless of whether the CDN URL itself is still
+  perfectly valid.
+  Root cause: `_stripEbrowse()` removes `raumfeld:ebrowse` and
+  `raumfeld:durability` from the metadata, but leaves `refID` (e.g.
+  `refID="0/RadioTime/Search/s-s8007"`) and `raumfeld:section="RadioTime"`.  The
+  kernel follows the `refID` to its internal ContentDirectory entry for the
+  station, finds the stored ebrowse URL there, and still manages a TuneIn session
+  — completely bypassing the stripped metadata.
+  Fix: new `_makeCdnMeta()` method strips ALL TuneIn markers: ebrowse, durability,
+  `raumfeld:section`, `raumfeld:name`, the `refID` attribute, and neutralises
+  `item id` / `parentID` to `cdn/direct` / `cdn`.  With no ContentDirectory
+  reference left, the kernel treats the play as a plain audio stream — zero
+  ebrowse calls, zero TuneIn rate-limit exposure, stream plays indefinitely.
+  Changes: (1) Path A (permanent CDN URL restart) now calls `_makeCdnMeta()` in
+  place of `_stripEbrowse()`; (2) Path B (bare `play()` fallback) now first
+  attempts a `setAvTransportUri` with `_makeCdnMeta(room._radioAvtMetadata)` +
+  `room._lastSeenCdnUri` before falling back to the kernel-managed bare `play()`,
+  ensuring the CDN-direct path is taken even when `CurrentTrackURI` on the zone
+  renderer is a `dlna-playsingle://` URI; (3) ECONNRESET recovery path also uses
+  `_makeCdnMeta()` for permanent CDN URLs.
+
 ## 1.2.92
 
 - Fix (recurring ~291 s stream drop — stale durability in CDN restart metadata):
