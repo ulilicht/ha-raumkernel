@@ -551,6 +551,26 @@ class RaumkernelHelper {
 
         rooms.sort((a, b) => a.name.localeCompare(b.name));
         this._state.availableRooms = rooms;
+
+        // Second-pass cross-room CDN cache restoration.
+        //
+        // Rooms processed early in the loop above may have had _radioAvtMetadata=null
+        // at that point even though a later-processed room (e.g. Kati, with a native
+        // dlna-playsingle:// AVTransportURI) contributed ebrowse DIDL to _cdnMetaCache
+        // for the same CDN URL.  This second pass restores _radioAvtMetadata for any
+        // room that still lacks it, benefiting from the now-complete in-memory cache.
+        for (const room of this._rooms.values()) {
+            if (!room._radioAvtMetadata && room._lastSeenCdnUri) {
+                const cached = this._cdnMetaCache[room._lastSeenCdnUri];
+                if (cached) {
+                    room._radioAvtMetadata = cached;
+                    console.log(
+                        `${LOG_PREFIX.REGISTRY} ${room.name}: cross-room TuneIn metadata` +
+                        ` restored for ${room._lastSeenCdnUri}`
+                    );
+                }
+            }
+        }
     }
 
     // ========================================================================
@@ -950,6 +970,17 @@ class RaumkernelHelper {
                 if (avturi.startsWith('https://') && !avturi.includes('opml.radiotime.com')) {
                     room._lastSeenCdnUri = avturi;
                 }
+                // Also capture from CurrentTrackURI when AVTransportURI is a
+                // dlna-playsingle:// reference (native-app loads).  This ensures
+                // that rooms loaded via the native app contribute their CDN URL
+                // to the cross-room metadata cache, enabling Kueche and similar
+                // rooms to inherit the ebrowse DIDL cached from Kati or TischlerEi.
+                if (!room._lastSeenCdnUri) {
+                    const trackUri = state.CurrentTrackURI || '';
+                    if (trackUri.startsWith('https://') && !trackUri.includes('opml.radiotime.com')) {
+                        room._lastSeenCdnUri = trackUri;
+                    }
+                }
 
                 const avtMeta   = state.AVTransportURIMetaData || '';
                 const trackMeta = state.CurrentTrackMetaData  || '';
@@ -961,7 +992,9 @@ class RaumkernelHelper {
                 // "Poisoned CDN" cleanup without registering a new TuneIn session.
                 if (!this._tuneInSerial) {
                     const ebrowseSrc = hasRealEbrowse(avtMeta) ? avtMeta : (hasRealEbrowse(trackMeta) ? trackMeta : '');
-                    const serialMatch = ebrowseSrc.match(/[?&]serial=([^&"<\s]+)/);
+                    // The ebrowse URL inside DIDL-Lite XML uses &amp; for '&', so
+                    // the regex must handle both literal '&' and the '&amp;' entity.
+                    const serialMatch = ebrowseSrc.match(/[?&](?:amp;)?serial=([^&"<\s]+)/);
                     if (serialMatch) {
                         this._tuneInSerial = decodeURIComponent(serialMatch[1]);
                         this._saveTuneInSerial();

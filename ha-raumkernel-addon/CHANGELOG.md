@@ -1,3 +1,36 @@
+## 1.2.97
+
+- Fix (serial extraction always fails — `&amp;` XML encoding not handled):
+  The TuneIn device serial lives inside a `raumfeld:ebrowse` URL embedded in DIDL-Lite
+  XML.  XML requires `&` to be escaped as `&amp;`, so the URL looks like
+  `...&amp;serial=78%3Aa5...`.  The extraction regex `/[?&]serial=/` expects a literal
+  `&`, which never appears in the encoded string — so `_tuneInSerial` was always `null`
+  and `_tryInjectEbrowse` always skipped with "serial not yet populated".
+  Fix: change the regex to `/[?&](?:amp;)?serial=/` to match both the encoded and
+  unencoded forms.
+
+- Fix (CDN metadata cache never populated for native-app rooms):
+  `_lastSeenCdnUri` was only updated when `AVTransportURI` was an HTTPS CDN URL.
+  Rooms loaded via the native app use `dlna-playsingle://` as their `AVTransportURI`
+  but still report the resolved CDN URL in `CurrentTrackURI`.  Because `_lastSeenCdnUri`
+  was never set for those rooms, their full TuneIn ebrowse DIDL (available in
+  `CurrentTrackMetaData`) was never saved to the shared CDN metadata cache on disk.
+  Fix: when `AVTransportURI` is not an HTTPS CDN URL, also check `CurrentTrackURI`
+  as a fallback source for `_lastSeenCdnUri`.  This allows rooms like Kati (which has
+  the full ebrowse DIDL from a native-app load) to contribute to the cross-room cache.
+
+- Fix (room processed before cache contributor — cross-room metadata not restored):
+  In `_broadcastRoomStates`, rooms are iterated in registry-insertion order.  Kueche
+  (whose `AVTransportURIMetaData` is `id="cdn/direct"` from a previous run) was
+  inserted before Kati (which has the good ebrowse DIDL).  When the cold-start
+  recovery ran for Kueche during the first-pass loop, Kati had not yet been processed
+  and `_cdnMetaCache` was still empty → recovery failed → `_radioAvtMetadata` stayed
+  `null` → `play()` fell through to the `cdn/direct` raw fallback → kernel in CDN-direct
+  mode → ~100 s drops (same symptom as `_makeCdnMeta`).
+  Fix: add a second-pass loop in `_broadcastRoomStates` that runs after all rooms have
+  been processed and caches fully populated.  Any room that still lacks
+  `_radioAvtMetadata` is restored from `_cdnMetaCache` using its `_lastSeenCdnUri`.
+
 ## 1.2.96
 
 - Fix (stream drops after ~296 s — TuneIn ebrowse/refID stripped for permanent CDN URLs):
