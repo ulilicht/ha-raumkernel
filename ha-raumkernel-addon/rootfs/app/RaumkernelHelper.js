@@ -1313,33 +1313,65 @@ class RaumkernelHelper {
             }
         }
 
-        // For live radio streams in STOPPED state use a bare UPnP Play().
+        // For live radio streams in STOPPED state, prefer Path A (CDN URL direct)
+        // over Path B (bare Play → kernel re-resolves dlna-playsingle://).
         //
-        // The Raumfeld kernel manages its own TuneIn session continuity.  Sending
-        // SetAVTransportURI (old Path C) registers a NEW TuneIn session which
-        // TuneIn throttles when called repeatedly — each new registration starts
-        // a fresh renewal clock that fires at :02 past each minute.  Back-to-back
-        // registrations (e.g. Play then loadSingle within 30 s) escalate throttle
-        // and cause drops as short as 37 s.
+        // Why Path B causes drops:
+        //   bare Play() on a dlna-playsingle:// AVTransportURI forces the Raumfeld
+        //   kernel to re-browse the ContentDirectory item and fetch the TuneIn <res>
+        //   URL, which registers a NEW TuneIn session.  TuneIn throttles repeated
+        //   registrations from the same device serial, causing drops as short as
+        //   82–126 s at the first renewal.  The native Raumfeld app avoids this —
+        //   it never issues bare Play() on a dlna-playsingle:// URI after a drop.
         //
-        // A bare Play() tells the kernel to resume using its existing session
-        // context, exactly as the native Raumfeld app does after a kernel-internal
-        // drop.  The kernel handles stale sessions and renewals on its own; even
-        // with durability deeply negative (observed: −240 s) the kernel renews
-        // successfully via its ContentDirectory subscription without any help.
+        // Why Path A works:
+        //   SetAVTransportURI with the raw CDN URL (no ebrowse/durability in the
+        //   metadata) tells the kernel to stream that URL without involving TuneIn
+        //   at all.  No session registration, no renewal clock, no throttle risk.
+        //   The kernel plays the CDN stream indefinitely.
         //
-        // The "Previous" button is suppressed by always reporting canPlayPrev=false
-        // for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
+        // The CDN URL is read from CurrentTrackURI which the Raumfeld renderer
+        // retains across PLAYING→STOPPED transitions.
+        //
+        // Path B (bare Play) remains as fallback when no CDN URL is cached yet
+        // (e.g. very first play after a cold start before any stream has played).
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
 
+            // Path A — CDN URL + station metadata (ebrowse/durability stripped).
+            const currentTrackUri = renderer.rendererState?.CurrentTrackURI;
+            const isDirectCdn = typeof currentTrackUri === 'string' &&
+                                currentTrackUri.startsWith('https://') &&
+                                !currentTrackUri.includes('opml.radiotime.com');
+            const cachedMeta = room._radioAvtMetadata;
+
+            if (isDirectCdn && cachedMeta) {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→CDN) for ${room.name}:` +
+                    ` ${currentTrackUri}`
+                );
+                this._clearSuppressInterval(room);
+                room._userStopped         = false;
+                room._lastPlayCommandTime = Date.now();
+                room._resumeAnchorSeconds = 0;
+                room._resumeAnchorTime    = Date.now();
+                room._resumeAnchorUri     = currentTrackUri;
+                room._resumeAnchorTrack   = undefined;
+                return renderer.setAvTransportUri(
+                    currentTrackUri,
+                    this._stripEbrowse(cachedMeta)
+                );
+            }
+
+            // Path B — bare Play() fallback: no CDN URL available yet.
+            // The kernel handles session re-establishment on its own.
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );
             this._clearSuppressInterval(room);
-            room._userStopped = false;
+            room._userStopped         = false;
             room._lastPlayCommandTime = Date.now();
             return renderer.play();
         }
