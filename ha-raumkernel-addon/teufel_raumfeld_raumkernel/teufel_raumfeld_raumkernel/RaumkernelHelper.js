@@ -1544,6 +1544,22 @@ class RaumkernelHelper {
                         `constructed ebrowse for ${room.name} (no cached meta, ` +
                         `serial=${this._tuneInSerial})`
                     );
+                } else {
+                    // For permanent CDN URLs (e.g. orf-live.ors-shoutcast.at) ebrowse is
+                    // not needed at all — _makeCdnMeta() strips every TuneIn marker before
+                    // use, so even minimal DIDL (refID / raumfeld:section but no ebrowse)
+                    // is sufficient.  Skip this fallback for TuneIn-dispatcher URLs
+                    // (rndfnk / aggregator=tunein) where ebrowse is mandatory for renewal.
+                    const isPerm = !currentTrackUri.includes('rndfnk') &&
+                                   !currentTrackUri.includes('aggregator=tunein');
+                    if (isPerm && avMeta) {
+                        effectiveMeta = avMeta;
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} play() live stream — ` +
+                            `using raw AVTransport metadata for ${room.name}` +
+                            ` (permanent CDN, no ebrowse cached)`
+                        );
+                    }
                 }
             }
 
@@ -1599,8 +1615,22 @@ class RaumkernelHelper {
             // The CDN URL itself never expires for permanent broadcaster streams
             // (e.g. orf-live.ors-shoutcast.at) — the stream continues indefinitely.
             const fallbackCdnUri = room._lastSeenCdnUri;
-            const fallbackMeta   = fallbackCdnUri
-                ? this._makeCdnMeta(room._radioAvtMetadata)
+            // CDN-direct is only safe for permanent (non-TuneIn-dispatcher) CDN URLs.
+            // For rndfnk / aggregator=tunein the kernel must manage TuneIn session renewal;
+            // stripping ebrowse would cause the stream to drop at first renewal (~8 min).
+            // Bare Play() below is preferable for those cases.
+            const isPermanentFallback = typeof fallbackCdnUri === 'string' &&
+                !fallbackCdnUri.includes('rndfnk') &&
+                !fallbackCdnUri.includes('aggregator=tunein');
+            // For permanent CDN URLs also accept the renderer's current AVTransportURIMetaData
+            // as metadata source when _radioAvtMetadata is absent (e.g. at startup when the
+            // kernel's metadata has no raumfeld:ebrowse).  _makeCdnMeta() will strip all
+            // TuneIn markers (refID, raumfeld:section, etc.) leaving clean minimal DIDL.
+            const rawFallbackMeta = isPermanentFallback
+                ? (room._radioAvtMetadata || renderer.rendererState?.AVTransportURIMetaData || '')
+                : null;
+            const fallbackMeta = (isPermanentFallback && rawFallbackMeta)
+                ? this._makeCdnMeta(rawFallbackMeta)
                 : null;
             if (fallbackCdnUri && fallbackMeta) {
                 console.log(

@@ -1,3 +1,30 @@
+## 1.2.94
+
+- Fix (stream always falls to bare `play()` — `_radioAvtMetadata` absent when kernel
+  reports no `raumfeld:ebrowse` in startup metadata):
+  After a clean restart the Raumfeld kernel populates `AVTransportURIMetaData` for
+  zones that were last playing a radio station, but the metadata it reports may contain
+  only minimal DIDL (song title, `refID`, `raumfeld:section`) **without** a
+  `raumfeld:ebrowse` element.  The existing caching guard (`hasRealEbrowse`) therefore
+  leaves `room._radioAvtMetadata = null`.  As a result:
+  - Path A gate (`isDirectCdn && effectiveMeta`) evaluates false even though the zone
+    renderer's `CurrentTrackURI` is a valid permanent CDN URL.
+  - Path B CDN-direct gate (`fallbackCdnUri && fallbackMeta`) also evaluates false
+    because `_makeCdnMeta(null)` returns null.
+  Both paths fall through to the bare `Play()` which causes TuneIn session management
+  and the associated throttle-induced drops (93 s, 59 s in the latest test).
+  Fix (Path A): when `_tryInjectEbrowse` cannot produce ebrowse metadata and the
+  current `AVTransportURI` is a permanent CDN URL (not rndfnk / aggregator=tunein),
+  use the renderer's raw `AVTransportURIMetaData` as `effectiveMeta` directly.
+  `_makeCdnMeta()` then strips all TuneIn markers before the `SetAVTransportURI`
+  call, so the kernel plays the CDN URL as a plain stream — no ebrowse, no TuneIn
+  session management.
+  Fix (Path B CDN-direct): restrict CDN-direct to permanent CDN URLs only (rndfnk
+  and aggregator=tunein continue to use bare `Play()` so the kernel manages TuneIn
+  session renewal).  When `room._radioAvtMetadata` is absent, fall back to
+  `renderer.rendererState?.AVTransportURIMetaData` as the metadata source for
+  `_makeCdnMeta()`.
+
 ## 1.2.93
 
 - Fix (recurring ~157 s stream drop — multi-room TuneIn session throttling):
