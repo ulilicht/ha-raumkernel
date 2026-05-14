@@ -882,6 +882,13 @@ class RaumkernelHelper {
                 room._lastPlayingTime = Date.now();
             }
 
+            // Track when TRANSITIONING starts so play() can detect a stuck kernel.
+            if (currState === 'TRANSITIONING' && prevState !== 'TRANSITIONING') {
+                room._transitioningStartTime = Date.now();
+            } else if (currState !== 'TRANSITIONING') {
+                room._transitioningStartTime = 0;
+            }
+
             // Log when a live-stream session ends and let the Raumfeld kernel
             // handle its own auto-restart.
             //
@@ -1466,18 +1473,30 @@ class RaumkernelHelper {
             return renderer.play();
         }
 
-        // Live stream already in TRANSITIONING: the kernel is already contacting TuneIn.
-        // Interrupting with stop()+loadSingle resets the ebrowse clock and makes any
-        // ongoing throttle worse.  Do nothing — let the kernel finish the transition.
-        // If the user needs to abort a very long hang, they should press Stop first
-        // (which puts the renderer in STOPPED), then Play.
+        // Live stream in TRANSITIONING: normally the kernel is already contacting TuneIn
+        // and we should not interrupt.  But if the kernel has been stuck in TRANSITIONING
+        // for more than 30 s (e.g. because TuneIn is throttled and the CDN connection
+        // never opens), force-stop it so Path A / Path B can restart with fresh metadata.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'TRANSITIONING') {
+            const transAge = room._transitioningStartTime
+                ? Date.now() - room._transitioningStartTime
+                : 0;
+            if (transAge < 30000) {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} play() live stream (TRANSITIONING→wait) for ${room.name}` +
+                    ` — kernel already loading, not interrupting`
+                );
+                return;
+            }
+            // Stuck for more than 30 s — force-stop and fall through to Path A/B.
             console.log(
-                `${LOG_PREFIX.COMMAND} play() live stream (TRANSITIONING→wait) for ${room.name}` +
-                ` — kernel already loading, not interrupting`
+                `${LOG_PREFIX.COMMAND} play() live stream (TRANSITIONING→stuck ${Math.round(transAge / 1000)}s)` +
+                ` for ${room.name} — forcing stop, will restart`
             );
-            return;
+            await renderer.stop();
+            // Brief pause for the STOPPED subscription event to arrive.
+            await new Promise(r => setTimeout(r, 600));
         }
 
         return renderer.play();
