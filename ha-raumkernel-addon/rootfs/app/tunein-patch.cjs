@@ -1,22 +1,59 @@
 'use strict';
 // Loaded via  node --require ./tunein-patch.cjs index.js
-// Runs before ANY other module is evaluated, so our patched http.request /
-// http.get / globalThis.fetch are captured by node-raumkernel's MediaListManager
+// Runs before ANY other module is evaluated, so our patched global.setTimeout,
+// http.request, http.get and globalThis.fetch are captured by node-raumkernel
 // at its own module-load time.
 //
-// node-raumkernel's MediaListManager fetches the raw opml.radiotime.com
-// relay URL stored in each renderer's AVTransportURI / AVTransportURIMetaData.
-// TuneIn counts each such fetch as a new session request against the shared
-// serial (78:a5:04:f1:82:ee), which triggers CDN-token throttle and causes
-// stream drops on playing rooms.
+// ── Why this file exists ─────────────────────────────────────────────────────
+//
+// Problem 1 — UPnP subscription renewal burst (PRIMARY CAUSE OF STREAM DROPS)
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// All UPnP subscriptions (AVTransport + RenderingControl for every renderer,
+// ~46 total) are created within a 5-second window at integration startup.
+// The Raumfeld kernel typically grants a ~240-second subscription timeout.
+// upnp-device-client schedules each renewal at (grantedTimeout − 30) seconds
+// after creation, so ALL renewals fire simultaneously at T+210 s.  That
+// second burst is as large as the startup burst and hits the kernel's HTTP
+// server while Kueche's TuneIn CDN-session renewal is also due, causing the
+// kernel to miss the renewal window → stream drops at ~T+211 s.
+//
+// Fix: intercept global.setTimeout and add 0–60 s of random jitter for calls
+// whose delay falls in 120 000–300 000 ms.  That range is exclusive to UPnP
+// subscription renewal timers (nothing else in node-raumkernel uses it).
+// With jitter the ~46 renewals spread across a 60-second window
+// (~0.8 renewals/s) — well within the kernel's capacity.
+//
+// Problem 2 — MediaListManager TuneIn relay fetches (secondary, now moot)
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// node-raumkernel's MediaListManager could fetch raw opml.radiotime.com relay
+// URLs stored in renderer metadata, registering new TuneIn sessions against
+// the shared serial and triggering CDN-token throttle.  The http/fetch patch
+// below blocks those fetches.  (No intercepts have fired in recent logs —
+// current code paths don't hit this path — but the guard stays in place.)
 //
 // The kernel's own ebrowse session renewals are made from the kernel *binary*
-// (a native process, not Node.js http), so this patch never affects them.
+// (a native process, not Node.js http), so neither patch affects them.
 
 // ── Startup diagnostic ───────────────────────────────────────────────────────
-// This message appears WITHOUT a timestamp (console override runs later in
-// index.js).  Its presence in the log confirms --require loaded this file.
+// These messages appear WITHOUT timestamps (console override runs later in
+// index.js).  Their presence in the log confirms --require loaded this file.
 process.stdout.write('[Command] [TuneIn-Intercept] CJS preloader active — patching http + fetch\n');
+
+// ── UPnP subscription renewal jitter ─────────────────────────────────────────
+const _origSetTimeout = global.setTimeout;
+global.setTimeout = function jitteredSetTimeout(fn, delay, ...args) {
+    // Intercept only the subscription-renewal-timer range: 120 s – 300 s.
+    // upnp-device-client uses setTimeout(renew, renewTimeout * 1000) where
+    // renewTimeout = max(grantedTimeout − 30, 30).  For a 240 s grant that
+    // is 210 000 ms; for a 300 s grant it is 270 000 ms — both land here.
+    // Nothing else in node-raumkernel uses a 2–5-minute timer.
+    if (typeof delay === 'number' && delay >= 120000 && delay <= 300000) {
+        const jitter = Math.floor(Math.random() * 60000); // 0–60 s
+        return _origSetTimeout(fn, delay + jitter, ...args);
+    }
+    return _origSetTimeout(fn, delay, ...args);
+};
+process.stdout.write('[Command] [SubRenewal-Jitter] setTimeout patched — subscription renewal burst prevention active\n');
 
 const http = require('http');
 const { EventEmitter } = require('events');

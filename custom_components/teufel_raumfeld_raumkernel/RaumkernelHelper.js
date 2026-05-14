@@ -27,6 +27,7 @@
  * - deviceManager.mediaRenderersVirtual is keyed by ZONE UDN
  */
 
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { JSDOM } from 'jsdom';
 import * as RaumkernelLib from 'node-raumkernel';
 
@@ -95,6 +96,11 @@ const LOG_PREFIX = {
     BROWSE: '[Browse]'
 };
 
+// Path to the on-disk cache that maps CDN stream URL → TuneIn DIDL-Lite metadata.
+// Survives add-on restarts; used to warm the metadata cache on cold starts where
+// the renderer was left with External/corrupt metadata by a previous run.
+const CDN_META_CACHE_FILE = '/data/radio_metadata_cache.json';
+
 // ============================================================================
 // MAIN CLASS
 // ============================================================================
@@ -120,13 +126,113 @@ class RaumkernelHelper {
             favourites: []
         };
 
-        this._setupLogging();
-        this._setupEventHandlers();
-        this.raumkernel.init();
+        /** @type {Object.<string, string>} CDN URL → TuneIn DIDL-Lite metadata (persisted) */
+        this._cdnMetaCache = {};
+        this._loadCdnMetaCache();
 
         /** @type {string|null} TuneIn device serial extracted from the first ebrowse URL seen.
          *  Used to reconstruct ebrowse metadata without fetching ContentDirectory. */
         this._tuneInSerial = null;
+
+        this._setupLogging();
+        this._setupEventHandlers();
+        this.raumkernel.init();
+
+        // Disable MediaListManager background content browsing.
+        //
+        // The MediaListManager's loadMediaItemListsByContainerUpdateIds is called
+        // every time the Raumfeld MediaServer fires a ContentDirectory NOTIFY (which
+        // happens roughly every 60 seconds as TuneIn streams update their now-playing
+        // song metadata).  For each non-zone container ID in the NOTIFY payload it
+        // issues a SOAP Browse to the MediaServer — e.g. "0/Favorites/MostPlayed" —
+        // which is completely unnecessary: the integration gets all the metadata it
+        // needs (title, artwork, station info) directly from AVTransport NOTIFY events
+        // via CurrentTrackMetaData / AVTransportURIMetaData.
+        //
+        // These background Browse requests add load to the Raumfeld MediaServer and
+        // are the root cause of stream drops: the MediaServer processes the Browse
+        // by internally resolving TuneIn station URLs, consuming TuneIn serial-session
+        // slots that the kernel needs for its own ebrowse renewal calls.
+        //
+        // Fix: replace the method with a no-op so the integration stays a pure
+        // event listener and never triggers unsolicited MediaServer Browse calls.
+        const mlm = this.raumkernel.managerDisposer?.mediaListManager;
+        if (mlm && typeof mlm.loadMediaItemListsByContainerUpdateIds === 'function') {
+            mlm.loadMediaItemListsByContainerUpdateIds = () => {};
+            console.log(`${LOG_PREFIX.REGISTRY} MediaListManager background browsing disabled (pure event-listener mode)`);
+        }
+    }
+
+    // ========================================================================
+    // CDN METADATA CACHE (persistent across restarts)
+    // ========================================================================
+
+    /** Load the on-disk CDN URL → TuneIn metadata map into memory. */
+    _loadCdnMetaCache() {
+        try {
+            if (existsSync(CDN_META_CACHE_FILE)) {
+                const data = JSON.parse(readFileSync(CDN_META_CACHE_FILE, 'utf8'));
+                if (data && typeof data === 'object') {
+                    this._cdnMetaCache = data;
+                    const n = Object.keys(data).length;
+                    console.log(`${LOG_PREFIX.REGISTRY} CDN metadata cache loaded (${n} station(s))`);
+                }
+            }
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.REGISTRY} CDN metadata cache load failed: ${err.message}`);
+            this._cdnMetaCache = {};
+        }
+    }
+
+    /**
+     * Persist a CDN URL → TuneIn metadata mapping.
+     * Write is skipped when the TuneIn station ID hasn't changed (avoids a disk
+     * write on every song-title metadata update for an already-cached station).
+     *
+     * @param {string} cdnUrl    - Direct HTTPS CDN stream URL (cache key)
+     * @param {string} metadata  - DIDL-Lite string containing <raumfeld:ebrowse>
+     */
+    _saveCdnMetaCacheEntry(cdnUrl, metadata) {
+        if (!cdnUrl || !metadata) return;
+        const sid = (m) => m.match(/[?&]id=(s\d+)[&"]/)?.[1] ?? null;
+        if (sid(metadata) === sid(this._cdnMetaCache[cdnUrl] ?? '')) return;
+        this._cdnMetaCache[cdnUrl] = metadata;
+        try {
+            writeFileSync(CDN_META_CACHE_FILE, JSON.stringify(this._cdnMetaCache, null, 2), 'utf8');
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.REGISTRY} CDN metadata cache write failed: ${err.message}`);
+        }
+    }
+
+    /**
+     * Attempt to inject raumfeld:ebrowse + raumfeld:durability into DIDL-Lite
+     * metadata that comes from a "poisoned" CDN state (AVTransportURIMetaData
+     * has a station refID but no ebrowse because a previous run stripped it).
+     *
+     * Station ID is extracted from the refID attribute.
+     * Device serial comes from _tuneInSerial (populated from the first real
+     * ebrowse URL seen in any room's subscription data).
+     *
+     * Returns the enriched DIDL-Lite string, or null if data is insufficient.
+     */
+    _tryInjectEbrowse(existingDidl) {
+        if (!existingDidl || !existingDidl.includes('</item>')) return null;
+        if (!this._tuneInSerial) return null;
+        const stMatch = existingDidl.match(/\brefID="[^"]*\/s-(s\d+)"/);
+        if (!stMatch) return null;
+        const stationId  = stMatch[1];
+        const encSerial  = encodeURIComponent(this._tuneInSerial);
+        const ebrowseUrl =
+            `http://opml.radiotime.com/Tune.ashx` +
+            `?partnerId=7aJ9pvV5` +
+            `&amp;formats=mp3%2Cogg%2Caac%2Chls` +
+            `&amp;serial=${encSerial}` +
+            `&amp;id=${stationId}` +
+            `&amp;c=ebrowse`;
+        return existingDidl.replace('</item>',
+            `<raumfeld:durability>120</raumfeld:durability>` +
+            `<raumfeld:ebrowse>${ebrowseUrl}</raumfeld:ebrowse>` +
+            `</item>`);
     }
 
     // ========================================================================
@@ -608,7 +714,8 @@ class RaumkernelHelper {
                     // Only reset _isLiveStream when the URI itself changes (new media source).
                     // If only the track number changed (same URI, e.g. song update on a radio
                     // stream), preserve the live-stream flag set earlier for that URI.
-                    const uriActuallyChanged = currentUri !== room._resumeAnchorUri;
+                    const prevAnchorUri      = room._resumeAnchorUri;  // save BEFORE update
+                    const uriActuallyChanged = currentUri !== prevAnchorUri;
                     room._resumeAnchorTrack = fingerprint;
                     room._resumeAnchorUri = currentUri;
                     room._resumeAnchorSeconds = 0;
@@ -699,15 +806,23 @@ class RaumkernelHelper {
             // for "External" streams loaded with a plain CDN URL and no TuneIn
             // context.  Caching that would overwrite good TuneIn metadata with a
             // useless value and break the renewal path.
-            if (isRadio) {
-                const avturi  = state.AVTransportURI || '';
+                if (isRadio) {
+                // Track the last direct CDN URL for this room (sticky — kept even when
+                // the URI later transitions to dlna-playsingle:// so that, when TuneIn
+                // metadata arrives for the same station, we can associate the two).
+                const avturi = state.AVTransportURI || '';
+                if (avturi.startsWith('https://') && !avturi.includes('opml.radiotime.com')) {
+                    room._lastSeenCdnUri = avturi;
+                }
+
                 const avtMeta   = state.AVTransportURIMetaData || '';
                 const trackMeta = state.CurrentTrackMetaData  || '';
                 const hasRealEbrowse = (m) => m.includes('<raumfeld:ebrowse>http');
+                let freshMeta = null;
 
                 // Extract the TuneIn device serial from the first real ebrowse URL we see
-                // (any room, any station). Used to reconstruct ebrowse metadata for the
-                // "Poisoned CDN" path in play() without registering a new TuneIn session.
+                // (any room, any station).  Used to reconstruct ebrowse metadata for the
+                // "Poisoned CDN" cleanup without registering a new TuneIn session.
                 if (!this._tuneInSerial) {
                     const ebrowseSrc = hasRealEbrowse(avtMeta) ? avtMeta : (hasRealEbrowse(trackMeta) ? trackMeta : '');
                     const serialMatch = ebrowseSrc.match(/[?&]serial=([^&"<\s]+)/);
@@ -723,12 +838,36 @@ class RaumkernelHelper {
                     // setAvTransportUri, the kernel fetches <res>, registers yet another
                     // TuneIn session, and the new session competes with the existing one
                     // → throttle → drops.  We keep ebrowse/durability for renewal.
-                    room._radioAvtMetadata = avtMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
+                    const strippedAvt = avtMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
+                    room._radioAvtMetadata = strippedAvt;
+                    freshMeta = strippedAvt;
                 } else if (hasRealEbrowse(trackMeta) && !room._radioAvtMetadata) {
                     // Fallback: strip the <res> element from CurrentTrackMetaData so
                     // we pass station-level info only (the kernel fetches a fresh
                     // session URL via ebrowse at load time).
-                    room._radioAvtMetadata = trackMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
+                    const stripped = trackMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
+                    room._radioAvtMetadata = stripped;
+                    freshMeta = stripped;
+                }
+
+                // Persist the CDN URL → TuneIn metadata mapping so a cold start
+                // after External-state corruption can use the cached metadata immediately.
+                if (freshMeta && room._lastSeenCdnUri) {
+                    this._saveCdnMetaCacheEntry(room._lastSeenCdnUri, freshMeta);
+                }
+
+                // Cold-start recovery: if the in-memory cache is still empty but we
+                // know the CDN URL, warm it from the on-disk store (e.g. room was left
+                // with External metadata by a previous run's loadUri call).
+                if (!room._radioAvtMetadata && room._lastSeenCdnUri) {
+                    const persisted = this._cdnMetaCache[room._lastSeenCdnUri];
+                    if (persisted) {
+                        room._radioAvtMetadata = persisted;
+                        console.log(
+                            `${LOG_PREFIX.REGISTRY} ${room.name}: restored TuneIn` +
+                            ` metadata from CDN cache (${room._lastSeenCdnUri})`
+                        );
+                    }
                 }
             }
 
@@ -812,11 +951,10 @@ class RaumkernelHelper {
                     setImmediate(() => this.loadSingle(room.name, `0/RadioTime/Search/s-${stationId}`));
                     // Safety: clear the flag after 15 s if TRANSITIONING never fires
                     setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
-                } else {
-                    // "Poisoned" CDN state (CDN URL + no ebrowse) is handled lazily in
-                    // play() via _tryInjectEbrowse() — no loadSingle here to avoid
-                    // registering an unnecessary TuneIn session at startup.
                 }
+                // "Poisoned" CDN state (CDN URL + no ebrowse) is handled lazily in
+                // play() via _tryInjectEbrowse() — no loadSingle here to avoid
+                // registering an unnecessary TuneIn session at startup.
             }
 
             // Abort the URI-swap load the instant TRANSITIONING is seen:
@@ -828,7 +966,9 @@ class RaumkernelHelper {
                 if (cleanupAge < 10000) {
                     // Save the fresh CDN URL the kernel established during the
                     // cleanup loadSingle so Path A can use it instead of the
-                    // stale pre-cleanup URL (Session 1).
+                    // stale pre-cleanup URL (Session 1).  The two sessions share
+                    // the same CDN URL for most stations, but saving here keeps
+                    // the active session and CDN URL consistent.
                     const freshUri = renderer.rendererState?.CurrentTrackURI;
                     if (typeof freshUri === 'string' &&
                         freshUri.startsWith('https://') &&
@@ -1785,37 +1925,6 @@ class RaumkernelHelper {
         }
 
         console.warn(`${LOG_PREFIX.MEDIA} No renderer for container load: ${room.name}`);
-    }
-
-    /**
-     * Attempt to inject raumfeld:ebrowse + raumfeld:durability into DIDL-Lite
-     * metadata that comes from a "poisoned" CDN state (AVTransportURIMetaData
-     * has a station refID but no ebrowse because a previous run stripped it).
-     *
-     * Station ID is extracted from the refID attribute.
-     * Device serial comes from _tuneInSerial (populated from the first real
-     * ebrowse URL seen in any room's subscription data).
-     *
-     * Returns the enriched DIDL-Lite string, or null if data is insufficient.
-     */
-    _tryInjectEbrowse(existingDidl) {
-        if (!existingDidl || !existingDidl.includes('</item>')) return null;
-        if (!this._tuneInSerial) return null;
-        const stMatch = existingDidl.match(/\brefID="[^"]*\/s-(s\d+)"/);
-        if (!stMatch) return null;
-        const stationId  = stMatch[1];
-        const encSerial  = encodeURIComponent(this._tuneInSerial);
-        const ebrowseUrl =
-            `http://opml.radiotime.com/Tune.ashx` +
-            `?partnerId=7aJ9pvV5` +
-            `&amp;formats=mp3%2Cogg%2Caac%2Chls` +
-            `&amp;serial=${encSerial}` +
-            `&amp;id=${stationId}` +
-            `&amp;c=ebrowse`;
-        return existingDidl.replace('</item>',
-            `<raumfeld:durability>120</raumfeld:durability>` +
-            `<raumfeld:ebrowse>${ebrowseUrl}</raumfeld:ebrowse>` +
-            `</item>`);
     }
 
     async loadSingle(roomIdentifier, itemId) {
