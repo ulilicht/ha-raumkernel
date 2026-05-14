@@ -454,6 +454,25 @@ class RaumkernelHelper {
     }
 
     /**
+     * Strip TuneIn session-management fields from DIDL-Lite metadata XML.
+     *
+     * When streaming from a permanent CDN URL the <raumfeld:ebrowse> and
+     * <raumfeld:durability> elements must NOT be sent to the kernel.  If they
+     * are present the kernel schedules periodic ebrowse renewal calls; TuneIn
+     * rate-limits those calls and eventually returns a zero-durability response
+     * that causes the kernel to tear down the stream (the :02-past-the-minute
+     * drop pattern).  The CDN URL itself never expires, so no renewal is needed.
+     *
+     * @param {string} metaXml - DIDL-Lite XML string
+     * @returns {string} XML with ebrowse / durability elements removed
+     */
+    _stripEbrowse(metaXml) {
+        return metaXml
+            .replace(/<raumfeld:durability>[^<]*<\/raumfeld:durability>/g, '')
+            .replace(/<raumfeld:ebrowse>[^<]*<\/raumfeld:ebrowse>/g, '');
+    }
+
+    /**
      * Gets or creates a virtual renderer for a room.
      * Used when switching from Spotify to standard UPnP playback.
      * @param {RoomState} room 
@@ -649,9 +668,10 @@ class RaumkernelHelper {
         // the item (obtaining the raumfeld:ebrowse URL from its DIDL-Lite metadata)
         // and handles all TuneIn session renewals without any assistance from us.
         //
-        // Cache _radioRefId and _radioAvtMetadata for informational purposes.
-        // They are no longer passed to loadSingle() in play(); play() now uses a
-        // bare UPnP Play() command so the kernel can reuse its existing session state.
+        // Cache _radioRefId and _radioAvtMetadata for informational purposes only.
+        // play() uses a bare UPnP Play() command so the kernel can reuse its
+        // existing session state — never SetAVTransportURI which would start a new
+        // TuneIn session registration and trigger throttle-induced drops.
         //
         // Sources for the metadata (in priority order):
         //   1. AVTransportURIMetaData — set by the native Raumfeld app when it loads
@@ -676,13 +696,19 @@ class RaumkernelHelper {
             // context.  Caching that would overwrite good TuneIn metadata with a
             // useless value and break the renewal path.
             if (isRadio) {
+                const avturi  = state.AVTransportURI || '';
                 const avtMeta   = state.AVTransportURIMetaData || '';
                 const trackMeta = state.CurrentTrackMetaData  || '';
                 const hasRealEbrowse = (m) => m.includes('<raumfeld:ebrowse>http');
                 if (hasRealEbrowse(avtMeta)) {
-                    // Ideal: native-app-provided metadata already has ebrowse and
-                    // no raw session URL (no <res>) — use as-is.
-                    room._radioAvtMetadata = avtMeta;
+                    // Strip <res> before caching so that Path A (setAvTransportUri with
+                    // CDN URL) never triggers a new-session fetch via the relay <res> URL.
+                    // ContentDirectory AVTransportURIMetaData always includes <res> (the
+                    // TuneIn relay session URL); if we cache it as-is and then use it in
+                    // setAvTransportUri, the kernel fetches <res>, registers yet another
+                    // TuneIn session, and the new session competes with the existing one
+                    // → throttle → drops.  We keep ebrowse/durability for renewal.
+                    room._radioAvtMetadata = avtMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
                 } else if (hasRealEbrowse(trackMeta) && !room._radioAvtMetadata) {
                     // Fallback: strip the <res> element from CurrentTrackMetaData so
                     // we pass station-level info only (the kernel fetches a fresh
@@ -764,6 +790,34 @@ class RaumkernelHelper {
                     setImmediate(() => this.loadSingle(room.name, `0/RadioTime/Search/s-${stationId}`));
                     // Safety: clear the flag after 15 s if TRANSITIONING never fires
                     setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
+                } else {
+                    // ---- "Poisoned" CDN URL cleanup ----------------------------------
+                    // A previous run called setAvTransportUri() with stripped metadata
+                    // (no raumfeld:ebrowse), leaving the kernel in "External" mode:
+                    // AVTransportURI is a plain HTTPS CDN URL with no ebrowse stored.
+                    // When play() is called on this state, _radioAvtMetadata is empty
+                    // so Path A is skipped, bare Play() falls through (Path B), the
+                    // kernel internally re-resolves ContentDirectory and registers a
+                    // fresh TuneIn session — which is throttled → drops at ~120 s.
+                    //
+                    // Fix: same loadSingle + stop-at-TRANSITIONING pattern as the
+                    // TuneIn relay URL cleanup above.  This restores proper
+                    // dlna-playsingle:// state with full ContentDirectory metadata
+                    // (including ebrowse) before the user ever presses Play.
+                    const isExternalCdn = currentUri.startsWith('https://') &&
+                                          !currentUri.includes('opml.radiotime.com');
+                    const missingEbrowse = !(state.AVTransportURIMetaData || '')
+                                            .includes('<raumfeld:ebrowse>http');
+                    if (isExternalCdn && missingEbrowse && room._radioRefId) {
+                        room._cleaningTuneInUri = Date.now();
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} Poisoned CDN state on stopped ${room.name} ` +
+                            `(no ebrowse in kernel metadata, ref=${room._radioRefId}) — ` +
+                            `restoring dlna-playsingle:// via ContentDirectory`
+                        );
+                        setImmediate(() => this.loadSingle(room.name, room._radioRefId));
+                        setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
+                    }
                 }
             }
 
@@ -774,6 +828,15 @@ class RaumkernelHelper {
                 const cleanupAge = Date.now() - room._cleaningTuneInUri;
                 room._cleaningTuneInUri = 0;
                 if (cleanupAge < 10000) {
+                    // Save the fresh CDN URL the kernel established during the
+                    // cleanup loadSingle so Path A can use it instead of the
+                    // stale pre-cleanup URL (Session 1).
+                    const freshUri = renderer.rendererState?.CurrentTrackURI;
+                    if (typeof freshUri === 'string' &&
+                        freshUri.startsWith('https://') &&
+                        !freshUri.includes('opml.radiotime.com')) {
+                        room._cleanupCdnUri = freshUri;
+                    }
                     console.log(
                         `${LOG_PREFIX.COMMAND} URI swap complete for ${room.name} — stopping`
                     );
@@ -1185,55 +1248,70 @@ class RaumkernelHelper {
             }
         }
 
-        // For live radio streams in STOPPED state, decide how to restart:
+        // For live radio streams in STOPPED state, prefer Path A (CDN URL direct)
+        // over Path B (bare Play → kernel re-resolves dlna-playsingle://).
         //
-        // Path A — CDN URL + cached TuneIn metadata:
-        //   Call SetAVTransportURI(cdnUrl, tuneInMeta) directly.  The kernel streams
-        //   from the CDN URL immediately without establishing a new TuneIn session,
-        //   so there are no periodic ebrowse renewal calls that can be throttled.
-        //   The "Previous" button is suppressed by always reporting canPlayPrev=false
-        //   for live streams in _extractNowPlaying, regardless of CurrentTransportActions.
+        // Why Path B causes drops:
+        //   bare Play() on a dlna-playsingle:// AVTransportURI forces the Raumfeld
+        //   kernel to re-browse the ContentDirectory item and fetch the TuneIn <res>
+        //   URL, which registers a NEW TuneIn session.  TuneIn throttles repeated
+        //   registrations from the same device serial, causing drops as short as
+        //   82–126 s at the first renewal.  The native Raumfeld app avoids this —
+        //   it never issues bare Play() on a dlna-playsingle:// URI after a drop.
         //
-        // Path B — bare Play() fallback:
-        //   If no CDN URL is available, fall back to a bare UPnP Play() on the
-        //   existing zone-renderer URI.
+        // Why Path A works:
+        //   SetAVTransportURI with the CDN URL + cached station metadata (which
+        //   includes raumfeld:ebrowse but has <res> stripped) reuses the existing
+        //   TuneIn session: no new session registration, and the kernel handles
+        //   renewal via ebrowse exactly as it would during normal playback.
+        //
+        //   Crucially, _radioAvtMetadata retains raumfeld:ebrowse and
+        //   raumfeld:durability — do NOT strip them here.  Without ebrowse the
+        //   kernel cannot renew the TuneIn CDN session, and the CDN closes the
+        //   connection once the initial token expires (~8 min for dispatcher.rndfnk
+        //   URLs tagged ?aggregator=tunein).
+        //
+        // The CDN URL is read from CurrentTrackURI which the Raumfeld renderer
+        // retains across PLAYING→STOPPED transitions.
+        //
+        // Path B (bare Play) remains as fallback when no CDN URL or cached
+        // metadata is available (very first play after a cold start).
         //
         // PAUSED_PLAYBACK is not affected: the CDN connection is still live.
         if (room?._isLiveStream === true &&
             renderer.rendererState?.TransportState === 'STOPPED') {
 
-            const cachedMeta    = room._radioAvtMetadata;
-            const hasTuneInMeta = typeof cachedMeta === 'string' &&
-                                  cachedMeta.includes('<raumfeld:ebrowse>http');
-
-            // Path A — CDN URL + cached TuneIn metadata
-            const currentTrackUri = renderer.rendererState?.CurrentTrackURI;
+            // Path A — CDN URL + station metadata (ebrowse/durability preserved,
+            //           <res> already stripped by the stateChanged cache logic).
+            const currentTrackUri = room._cleanupCdnUri || renderer.rendererState?.CurrentTrackURI;
+            room._cleanupCdnUri = undefined;  // consume once
             const isDirectCdn = typeof currentTrackUri === 'string' &&
                                 currentTrackUri.startsWith('https://') &&
                                 !currentTrackUri.includes('opml.radiotime.com');
-            if (isDirectCdn && hasTuneInMeta) {
+            const cachedMeta = room._radioAvtMetadata;
+
+            if (isDirectCdn && cachedMeta) {
                 console.log(
-                    `${LOG_PREFIX.COMMAND} Reloading ${room.name} CDN+TuneIn-meta` +
-                    ` (renewal-only, no new session): ${currentTrackUri}`
+                    `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→CDN) for ${room.name}:` +
+                    ` ${currentTrackUri}`
                 );
                 this._clearSuppressInterval(room);
-                room._userStopped          = false;
-                room._lastPlayCommandTime  = Date.now();
-                room._resumeAnchorSeconds  = 0;
-                room._resumeAnchorTime     = Date.now();
-                room._resumeAnchorUri      = currentTrackUri;
-                room._resumeAnchorTrack    = undefined;
-                room._radioOriginalUrl     = currentTrackUri;
+                room._userStopped         = false;
+                room._lastPlayCommandTime = Date.now();
+                room._resumeAnchorSeconds = 0;
+                room._resumeAnchorTime    = Date.now();
+                room._resumeAnchorUri     = currentTrackUri;
+                room._resumeAnchorTrack   = undefined;
                 return renderer.setAvTransportUri(currentTrackUri, cachedMeta);
             }
 
-            // Path B — bare Play() last resort:
-            //   No usable CDN URL. Let the kernel handle session re-establishment.
+            // Path B — bare Play() fallback: no CDN URL or metadata available.
+            // The kernel handles session re-establishment on its own.
             console.log(
                 `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→kernel restart) for ${room.name}`
             );
             this._clearSuppressInterval(room);
-            room._userStopped = false;
+            room._userStopped         = false;
             room._lastPlayCommandTime = Date.now();
             return renderer.play();
         }
@@ -1683,6 +1761,25 @@ class RaumkernelHelper {
     async loadSingle(roomIdentifier, itemId) {
         const room = this.findRoom(roomIdentifier);
         if (!room) return;
+
+        // Dedup guard: loading the exact same item twice within 60 s causes
+        // two TuneIn session registrations in quick succession which TuneIn
+        // throttles, producing drops as short as 7 s.  The most common trigger
+        // is the user tapping a favorites item a second time because the HA
+        // frontend hadn't yet refreshed to show PLAYING.  Silently ignore the
+        // duplicate; the first load is already in flight.
+        const now = Date.now();
+        if (room._lastLoadSingleId === itemId &&
+            room._lastLoadSingleTime &&
+            now - room._lastLoadSingleTime < 60000) {
+            console.log(
+                `${LOG_PREFIX.MEDIA} Ignoring duplicate loadSingle within 60 s` +
+                ` for ${room.name}: ${itemId}`
+            );
+            return;
+        }
+        room._lastLoadSingleId   = itemId;
+        room._lastLoadSingleTime = now;
 
         let renderer = this._getRendererForRoom(room);
 

@@ -785,10 +785,16 @@ class RaumkernelHelper {
                 const hasRealEbrowse = (m) => m.includes('<raumfeld:ebrowse>http');
                 let freshMeta = null;
                 if (hasRealEbrowse(avtMeta)) {
-                    // Ideal: native-app-provided metadata already has ebrowse and
-                    // no raw session URL (no <res>) — use as-is.
-                    room._radioAvtMetadata = avtMeta;
-                    freshMeta = avtMeta;
+                    // Strip <res> before caching so that Path A (setAvTransportUri with
+                    // CDN URL) never triggers a new-session fetch via the relay <res> URL.
+                    // ContentDirectory AVTransportURIMetaData always includes <res> (the
+                    // TuneIn relay session URL); if we cache it as-is and then use it in
+                    // setAvTransportUri, the kernel fetches <res>, registers yet another
+                    // TuneIn session, and the new session competes with the existing one
+                    // → throttle → drops.  We keep ebrowse/durability for renewal.
+                    const strippedAvt = avtMeta.replace(/<res\b[^>]*>[\s\S]*?<\/res>/g, '');
+                    room._radioAvtMetadata = strippedAvt;
+                    freshMeta = strippedAvt;
                 } else if (hasRealEbrowse(trackMeta) && !room._radioAvtMetadata) {
                     // Fallback: strip the <res> element from CurrentTrackMetaData so
                     // we pass station-level info only (the kernel fetches a fresh
@@ -930,6 +936,17 @@ class RaumkernelHelper {
                 const cleanupAge = Date.now() - room._cleaningTuneInUri;
                 room._cleaningTuneInUri = 0;
                 if (cleanupAge < 10000) {
+                    // Save the fresh CDN URL the kernel established during the
+                    // cleanup loadSingle so Path A can use it instead of the
+                    // stale pre-cleanup URL (Session 1).  The two sessions share
+                    // the same CDN URL for most stations, but saving here keeps
+                    // the active session and CDN URL consistent.
+                    const freshUri = renderer.rendererState?.CurrentTrackURI;
+                    if (typeof freshUri === 'string' &&
+                        freshUri.startsWith('https://') &&
+                        !freshUri.includes('opml.radiotime.com')) {
+                        room._cleanupCdnUri = freshUri;
+                    }
                     console.log(
                         `${LOG_PREFIX.COMMAND} URI swap complete for ${room.name} — stopping`
                     );
@@ -1376,7 +1393,8 @@ class RaumkernelHelper {
 
             // Path A — CDN URL + station metadata (ebrowse/durability preserved,
             //           <res> already stripped by the stateChanged cache logic).
-            const currentTrackUri = renderer.rendererState?.CurrentTrackURI;
+            const currentTrackUri = room._cleanupCdnUri || renderer.rendererState?.CurrentTrackURI;
+            room._cleanupCdnUri = undefined;  // consume once
             const isDirectCdn = typeof currentTrackUri === 'string' &&
                                 currentTrackUri.startsWith('https://') &&
                                 !currentTrackUri.includes('opml.radiotime.com');
