@@ -259,6 +259,14 @@ class RaumkernelHelper {
                 if (this.raumkernel.getSettings().raumfeldHost !== "0.0.0.0") {
                      console.log(`${LOG_PREFIX.REGISTRY} Connected to fixed host: ${this.raumkernel.getSettings().raumfeldHost}`);
                 }
+                // Share the discovered kernel host with tunein-patch.cjs so the
+                // physical-renderer SUBSCRIBE suppression can use the real IP
+                // rather than the static default (useful for non-standard subnets).
+                const dm = this.raumkernel.managerDisposer?.deviceManager;
+                if (dm?.host && dm.host !== global._raumfeldKernelHost) {
+                    global._raumfeldKernelHost = dm.host;
+                    console.log(`${LOG_PREFIX.REGISTRY} Kernel host confirmed: ${dm.host}`);
+                }
                 this._refreshRoomRegistry();
                 
                 // Process initial zone state
