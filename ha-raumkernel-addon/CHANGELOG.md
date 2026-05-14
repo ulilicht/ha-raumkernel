@@ -1,3 +1,23 @@
+## 1.2.95
+
+- Fix (100 s stream drop — Kueche loses TuneIn session when another room changes station):
+  When `_radioAvtMetadata` is null at play time (startup metadata has no `raumfeld:ebrowse`)
+  the raw-fallback path in Path A uses `renderer.rendererState.AVTransportURIMetaData`
+  directly.  Previous code then applied `_makeCdnMeta()` which stripped `refID` and
+  `raumfeld:section` from the DIDL.  Without those markers the kernel has no way to
+  look up the station's `ebrowse` URL in its own ContentDirectory, so it *borrows* the
+  TuneIn session from another renderer that happens to be playing the same CDN URL (e.g.
+  KellerStueberl playing Hitradio Ö3 via `dlna-playsingle://`).  When that renderer
+  changes station, its session expires ~19 s later — and Kueche drops simultaneously.
+  Fix: track the raw-fallback path with an `isRawFallback` flag and skip `_makeCdnMeta()`
+  for that case.  The DIDL keeps `refID` / `raumfeld:section`; the kernel follows the
+  `refID` to the ContentDirectory entry for the station, finds the `ebrowse` URL there,
+  and establishes an **independent** TuneIn session for Kueche — not shared with other
+  renderers.
+- Diagnostic: add per-guard log lines to `_tryInjectEbrowse()` so future logs reveal
+  exactly which condition (no DIDL, no serial, no refID match) prevents ebrowse
+  injection.
+
 ## 1.2.94
 
 - Fix (stream always falls to bare `play()` — `_radioAvtMetadata` absent when kernel

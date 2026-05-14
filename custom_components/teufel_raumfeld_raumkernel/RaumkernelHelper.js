@@ -249,10 +249,20 @@ class RaumkernelHelper {
      * Returns the enriched DIDL-Lite string, or null if data is insufficient.
      */
     _tryInjectEbrowse(existingDidl) {
-        if (!existingDidl || !existingDidl.includes('</item>')) return null;
-        if (!this._tuneInSerial) return null;
+        if (!existingDidl || !existingDidl.includes('</item>')) {
+            console.log(`${LOG_PREFIX.COMMAND} _tryInjectEbrowse: skip — no DIDL or no </item> (len=${existingDidl?.length ?? 0})`);
+            return null;
+        }
+        if (!this._tuneInSerial) {
+            console.log(`${LOG_PREFIX.COMMAND} _tryInjectEbrowse: skip — _tuneInSerial not yet populated`);
+            return null;
+        }
         const stMatch = existingDidl.match(/\brefID="[^"]*\/s-(s\d+)"/);
-        if (!stMatch) return null;
+        if (!stMatch) {
+            const snippet = existingDidl.replace(/\s+/g, ' ').substring(0, 200);
+            console.log(`${LOG_PREFIX.COMMAND} _tryInjectEbrowse: skip — no refID match in: ${snippet}`);
+            return null;
+        }
         const stationId  = stMatch[1];
         const encSerial  = encodeURIComponent(this._tuneInSerial);
         const ebrowseUrl =
@@ -1534,6 +1544,7 @@ class RaumkernelHelper {
             // extracted from any room's subscription data.  This avoids a loadSingle
             // call (which would register a new TuneIn session and deepen any throttle).
             let effectiveMeta = cachedMeta;
+            let isRawFallback = false;  // set when effectiveMeta came from raw AVTransportURIMetaData
             if (isDirectCdn && !effectiveMeta) {
                 const avMeta = renderer.rendererState?.AVTransportURIMetaData || '';
                 const injected = this._tryInjectEbrowse(avMeta);
@@ -1554,6 +1565,7 @@ class RaumkernelHelper {
                                    !currentTrackUri.includes('aggregator=tunein');
                     if (isPerm && avMeta) {
                         effectiveMeta = avMeta;
+                        isRawFallback = true;
                         console.log(
                             `${LOG_PREFIX.COMMAND} play() live stream — ` +
                             `using raw AVTransport metadata for ${room.name}` +
@@ -1576,19 +1588,20 @@ class RaumkernelHelper {
                 room._resumeAnchorUri     = currentTrackUri;
                 room._resumeAnchorTrack   = undefined;
                 // Permanent CDN URLs (direct broadcaster streams like orf-live.ors-shoutcast.at)
-                // never expire so we pass fully de-TuneIn'd metadata (_makeCdnMeta):
-                //   • strips ebrowse / durability (no renewal scheduling)
-                //   • strips refID / raumfeld:section (kernel cannot follow these to
-                //     look up the station's ebrowse URL in its ContentDirectory)
-                //   • neutralises item id/parentID (no ContentDirectory id lookup)
-                // Without any TuneIn reference the kernel plays the CDN URL as a
-                // plain audio stream — no ebrowse calls, no TuneIn rate-limit hits,
-                // stream plays indefinitely until the CDN itself disconnects.
-                // TuneIn dispatcher CDN URLs (rndfnk / aggregator=tunein) do require
-                // periodic renewal and must keep their full ebrowse metadata.
+                // get fully de-TuneIn'd metadata (_makeCdnMeta) when we have cached or
+                // ebrowse-injected metadata (the kernel doesn't need ContentDirectory at all).
+                //
+                // Exception — raw-fallback path (isRawFallback=true): the effectiveMeta came
+                // from renderer.rendererState.AVTransportURIMetaData which already has no
+                // raumfeld:ebrowse but DOES have refID / raumfeld:section.  If we strip those
+                // too (_makeCdnMeta), the kernel has no way to establish its own independent
+                // TuneIn session and will borrow a session from another room playing the same
+                // CDN URL.  When that room stops, Kueche stops too (observed 100 s drops).
+                // By keeping refID/section the kernel can follow refID → ContentDirectory →
+                // ebrowse URL → create its own independent session.
                 const isPermanentCdn = !currentTrackUri.includes('rndfnk') &&
                                        !currentTrackUri.includes('aggregator=tunein');
-                const metaForRestart = isPermanentCdn
+                const metaForRestart = (isPermanentCdn && !isRawFallback)
                     ? this._makeCdnMeta(effectiveMeta)
                     : effectiveMeta;
                 return renderer.setAvTransportUri(currentTrackUri, metaForRestart);
