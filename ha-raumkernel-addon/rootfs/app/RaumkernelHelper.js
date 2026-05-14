@@ -892,6 +892,34 @@ class RaumkernelHelper {
                     setImmediate(() => this.loadSingle(room.name, `0/RadioTime/Search/s-${stationId}`));
                     // Safety: clear the flag after 15 s if TRANSITIONING never fires
                     setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
+                } else {
+                    // ---- "Poisoned" CDN URL cleanup ----------------------------------
+                    // A previous run called setAvTransportUri() with stripped metadata
+                    // (no raumfeld:ebrowse), leaving the kernel in "External" mode:
+                    // AVTransportURI is a plain HTTPS CDN URL with no ebrowse stored.
+                    // When play() is called on this state, _radioAvtMetadata is empty
+                    // so Path A is skipped, bare Play() falls through (Path B), the
+                    // kernel internally re-resolves ContentDirectory and registers a
+                    // fresh TuneIn session — which is throttled → drops at ~120 s.
+                    //
+                    // Fix: same loadSingle + stop-at-TRANSITIONING pattern as the
+                    // TuneIn relay URL cleanup above.  This restores proper
+                    // dlna-playsingle:// state with full ContentDirectory metadata
+                    // (including ebrowse) before the user ever presses Play.
+                    const isExternalCdn = currentUri.startsWith('https://') &&
+                                          !currentUri.includes('opml.radiotime.com');
+                    const missingEbrowse = !(state.AVTransportURIMetaData || '')
+                                            .includes('<raumfeld:ebrowse>http');
+                    if (isExternalCdn && missingEbrowse && room._radioRefId) {
+                        room._cleaningTuneInUri = Date.now();
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} Poisoned CDN state on stopped ${room.name} ` +
+                            `(no ebrowse in kernel metadata, ref=${room._radioRefId}) — ` +
+                            `restoring dlna-playsingle:// via ContentDirectory`
+                        );
+                        setImmediate(() => this.loadSingle(room.name, room._radioRefId));
+                        setTimeout(() => { if (room._cleaningTuneInUri) room._cleaningTuneInUri = 0; }, 15000);
+                    }
                 }
             }
 
