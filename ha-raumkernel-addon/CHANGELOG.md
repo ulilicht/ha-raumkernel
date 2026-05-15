@@ -1,3 +1,29 @@
+## 1.2.109
+
+- Fix (Kueche stops while TischlerEi keeps playing — partial zone drop not detected or recovered):
+  When the TuneIn CDN session renews every 120 s, one physical renderer in the zone can lose
+  its CDN proxy connection while the zone itself stays alive (the other room continues playing).
+  Because the zone renderer's overall `TransportState` remained `PLAYING`, our drop detection
+  (which checked `state.TransportState`) never noticed Kueche had stopped.
+
+  Fix — three coordinated changes in `RaumkernelHelper.js`:
+
+  1. **Correct per-room state detection**: `_extractNowPlaying` now parses `state.RoomStates`
+     (e.g. `uuid:Kueche=STOPPED,uuid:TischlerEi=PLAYING`) to derive the room-specific
+     `currState` instead of using the zone-level `TransportState`.  Partial drops are now
+     logged as "Stream dropped for Kueche (session Xs)".
+
+  2. **Auto-recovery (3 s timer)**: When a partial drop is detected (`currState=STOPPED` but
+     zone `TransportState=PLAYING`, room not user-stopped), a 3-second timer fires.
+     If the room hasn't self-healed, it is dropped from the zone via `dropRoomFromZone()`
+     and then re-added via `loadSingle()`.  The `loadSingle` zone-join logic finds the
+     still-playing zone (TischlerEi) and calls `connectRoomToZone()` — Kueche rejoins
+     without interrupting TischlerEi.
+
+  3. **Manual recovery via Play button**: `play()` now checks if the room is `STOPPED` in
+     `RoomStates` while the zone is `PLAYING`.  If so, it performs the same drop+rejoin
+     instead of falling through to a no-op `renderer.play()`.
+
 ## 1.2.108
 
 - Fix (stopping TischlerEi also stops Kueche when they share a zone):

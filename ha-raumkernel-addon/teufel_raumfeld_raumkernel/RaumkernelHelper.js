@@ -1053,7 +1053,16 @@ class RaumkernelHelper {
             }
 
             const prevState = room._prevTransportState;
-            const currState = state.TransportState;
+            // For rooms in a multi-room zone the zone renderer's overall TransportState
+            // stays PLAYING even when one room's physical renderer drops from the CDN
+            // proxy connection.  Extract the room-specific state from RoomStates so
+            // partial drops (e.g. Kueche=STOPPED while TischlerEi=PLAYING) are
+            // detected correctly.
+            let currState = state.TransportState;
+            if (room && state.RoomStates) {
+                const rm = state.RoomStates.match(new RegExp(room.roomUdn + '=([A-Z_]+)'));
+                if (rm) currState = rm[1];
+            }
             room._prevTransportState = currState;
 
             // Record session-start time when entering PLAYING (only on the actual
@@ -1093,6 +1102,66 @@ class RaumkernelHelper {
                     console.log(`${LOG_PREFIX.COMMAND} Stream dropped for ${room.name} (session ${ageStr}) — kernel will auto-restart, or press Play`);
                 } else if (prevState === 'TRANSITIONING') {
                     console.log(`${LOG_PREFIX.COMMAND} Stream load failed or stopped for ${room.name}`);
+                }
+
+                // Partial zone drop: the zone renderer is still PLAYING (another room
+                // is keeping it alive) but THIS room's physical renderer has lost its
+                // CDN proxy connection.  The kernel will not auto-restart because the
+                // zone is still active.  Auto-recover by dropping the room from the
+                // zone and re-joining it via loadSingle, which uses the zone-join logic
+                // to reconnect without interrupting the other rooms that are still
+                // playing.
+                if (state.TransportState === 'PLAYING' &&
+                    room._lastItemId && !room._userStopped) {
+                    const rejoinItemId = room._lastItemId;
+                    console.log(
+                        `${LOG_PREFIX.COMMAND} Partial zone drop for ${room.name}` +
+                        ` — scheduling drop+rejoin in 3 s (item ${rejoinItemId})`
+                    );
+                    setTimeout(async () => {
+                        try {
+                            // Verify the room is still stuck (hasn't self-healed).
+                            const r2 = this._getRendererForRoom(room);
+                            if (r2) {
+                                const rs2 = r2.rendererState?.RoomStates || '';
+                                const rm2 = rs2.match(new RegExp(room.roomUdn + '=([A-Z_]+)'));
+                                const roomState2 = rm2 ? rm2[1] : r2.rendererState?.TransportState;
+                                if (roomState2 === 'PLAYING' || roomState2 === 'TRANSITIONING') {
+                                    console.log(
+                                        `${LOG_PREFIX.COMMAND} Partial zone drop for ${room.name}` +
+                                        ` self-healed — skipping rejoin`
+                                    );
+                                    return;
+                                }
+                            }
+                            const zoneManager = this._getZoneManager();
+                            if (zoneManager) {
+                                const zoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+                                if (zoneUdn) {
+                                    console.log(
+                                        `${LOG_PREFIX.COMMAND} Dropping ${room.name} from zone` +
+                                        ` ${zoneUdn} for partial-drop rejoin`
+                                    );
+                                    try {
+                                        await zoneManager.dropRoomFromZone(room.roomUdn);
+                                    } catch (e) {
+                                        console.warn(
+                                            `${LOG_PREFIX.COMMAND} dropRoomFromZone for partial-drop` +
+                                            ` failed for ${room.name}: ${e.message}`
+                                        );
+                                    }
+                                    await new Promise(r => setTimeout(r, 1000));
+                                }
+                            }
+                            room._userStopped = false;
+                            await this.loadSingle(room.roomUdn, rejoinItemId);
+                        } catch (err) {
+                            console.warn(
+                                `${LOG_PREFIX.COMMAND} Partial-drop rejoin failed for ${room.name}:` +
+                                ` ${err.message}`
+                            );
+                        }
+                    }, 3000);
                 }
             }
 
@@ -1563,6 +1632,45 @@ class RaumkernelHelper {
                     console.log(`${LOG_PREFIX.COMMAND} Skipping seek: live stream for ${room?.name}`);
                 } else if (!canSeek) {
                     console.log(`${LOG_PREFIX.COMMAND} Skipping seek: not supported by device for ${room?.name}`);
+                }
+            }
+        }
+
+        // Partial zone drop: the zone renderer is PLAYING but this room's physical
+        // renderer has lost its CDN proxy connection (RoomStates shows room=STOPPED
+        // while zone=PLAYING).  The kernel won't auto-recover because the zone is
+        // still alive.  Reconnect by dropping the room from the zone and re-adding
+        // it via loadSingle (zone-join logic picks up the still-playing zone).
+        if (room?._isLiveStream === true &&
+            renderer.rendererState?.TransportState === 'PLAYING' &&
+            renderer.rendererState?.RoomStates &&
+            room._lastItemId) {
+            const rm = renderer.rendererState.RoomStates.match(
+                new RegExp(room.roomUdn + '=([A-Z_]+)')
+            );
+            if (rm && rm[1] === 'STOPPED') {
+                const zoneManager = this._getZoneManager();
+                if (zoneManager) {
+                    const zoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+                    if (zoneUdn) {
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} play() partial zone drop for ${room.name}` +
+                            ` — dropping and rejoining zone ${zoneUdn}`
+                        );
+                        room._userStopped         = false;
+                        room._lastPlayCommandTime = Date.now();
+                        try {
+                            await zoneManager.dropRoomFromZone(room.roomUdn);
+                            await new Promise(r => setTimeout(r, 800));
+                            await this.loadSingle(room.roomUdn, room._lastItemId);
+                            return;
+                        } catch (err) {
+                            console.warn(
+                                `${LOG_PREFIX.COMMAND} play() zone-rejoin failed for ${room.name}` +
+                                ` (${err.message}); falling through`
+                            );
+                        }
+                    }
                 }
             }
         }
