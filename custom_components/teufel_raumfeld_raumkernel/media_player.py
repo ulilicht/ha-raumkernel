@@ -88,6 +88,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_content_id = None
         self._attr_shuffle = False
         self._attr_repeat = RepeatMode.OFF
+        self._zone_members: list[str] = []
         self.update_state(room_data)
 
     @property
@@ -141,7 +142,19 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         else:
             self._attr_state = MediaPlayerState.PAUSED
 
-        self._attr_volume_level = (now_playing.get("volume", 0) or 0) / 100.0
+        # Store zone info for extra state attributes.
+        # Read zone_members here so we can choose the right volume source below.
+        zone_members = room_data.get("zoneMembers", [])
+        is_grouped = len(zone_members) > 1
+
+        # When in a multi-room zone the volume slider controls (and reflects) the
+        # zone-master volume so that dragging it moves all speakers together —
+        # matching the native Raumfeld app.  When solo it controls the device.
+        if is_grouped:
+            raw_volume = now_playing.get("zoneVolume", now_playing.get("volume", 0) or 0)
+        else:
+            raw_volume = now_playing.get("volume", 0) or 0
+        self._attr_volume_level = (raw_volume or 0) / 100.0
         self._attr_is_volume_muted = now_playing.get("isMuted", False)
 
         self._attr_media_title = now_playing.get("track")
@@ -176,7 +189,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
-        self._zone_members = room_data.get("zoneMembers", [])
+        self._zone_members = zone_members
         self._current_zone_udn = room_data.get("currentZoneUdn")
         self._zone_volume = now_playing.get("zoneVolume", now_playing.get("volume", 0) or 0)
 
@@ -359,8 +372,15 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             _LOGGER.warning("Failed to wake %s: %s", self.name, err)
 
     async def async_set_volume_level(self, volume: float) -> None:
-        """Set volume level, range 0..1."""
-        await self._client.set_volume(self._udn, int(volume * 100))
+        """Set volume level, range 0..1.
+
+        When grouped, adjusts the zone master (all members move together).
+        When solo, adjusts this device only.
+        """
+        if self._zone_members and len(self._zone_members) > 1:
+            await self._client.set_zone_volume(self._udn, int(volume * 100))
+        else:
+            await self._client.set_volume(self._udn, int(volume * 100))
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute the volume."""

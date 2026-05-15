@@ -1,4 +1,23 @@
-## 1.3.0
+## 1.3.1
+
+- Improvement (volume slider context-aware behaviour):
+  The media-player volume slider now acts on the zone master when the room is
+  grouped, and on the individual device when solo.
+
+  - **Grouped** → slider shows and controls the zone-master volume (all zone
+    members move together, matching the native Raumfeld app's group slider).
+  - **Solo** → slider shows and controls the device volume only.
+
+  A new **Device Volume** `number` entity is also created per room.  When a
+  room is in a zone this entity lets you fine-tune a single speaker's level
+  without affecting the other members.  It always reflects and controls the
+  per-room absolute volume (from `state.RoomVolumes`).
+
+  The previous "Zone Volume" `number` entity (added in 1.3.0 but renamed) is
+  replaced by "Device Volume"; if you see a stale "Zone Volume" entity in HA
+  it can be deleted from the entity registry.
+
+
 
 - Fix (volume up on one room appeared to affect the other room):
   `_extractNowPlaying` was returning `state.Volume` as the `volume` field for every room.
