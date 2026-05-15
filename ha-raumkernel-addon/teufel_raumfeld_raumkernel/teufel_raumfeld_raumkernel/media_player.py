@@ -89,6 +89,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_shuffle = False
         self._attr_repeat = RepeatMode.OFF
         self._zone_members: list[str] = []
+        self._zone_volume_mode: bool = False
         self.update_state(room_data)
 
     @property
@@ -142,15 +143,19 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         else:
             self._attr_state = MediaPlayerState.PAUSED
 
-        # Store zone info for extra state attributes.
-        # Read zone_members here so we can choose the right volume source below.
+        # UPnP class — compute early; used for volume, repeat, and features below.
+        self._upnp_class = now_playing.get("classString", "")
+        upnp_class_lower = self._upnp_class.lower()
+        is_live_radio = "audiobroadcast" in upnp_class_lower
+
+        # Zone membership — needed for volume routing.
         zone_members = room_data.get("zoneMembers", [])
         is_grouped = len(zone_members) > 1
 
-        # When in a multi-room zone the volume slider controls (and reflects) the
-        # zone-master volume so that dragging it moves all speakers together —
-        # matching the native Raumfeld app.  When solo it controls the device.
-        if is_grouped:
+        # Volume: default = this device only.
+        # When the user has activated zone-volume mode (repeat=ALL toggle on live
+        # radio) and the room is grouped, show and control the zone master instead.
+        if self._zone_volume_mode and is_grouped:
             raw_volume = now_playing.get("zoneVolume", now_playing.get("volume", 0) or 0)
         else:
             raw_volume = now_playing.get("volume", 0) or 0
@@ -163,9 +168,6 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_image_url = now_playing.get("image")
         self._attr_media_content_id = now_playing.get("uri")
 
-        # Store UPnP class for media_content_type property
-        self._upnp_class = now_playing.get("classString", "")
-
         # Parse duration and position for seek functionality
         # Add-on provides seconds directly as integer
         self._attr_media_duration = now_playing.get("durationSeconds", 0)
@@ -177,15 +179,23 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
             self._attr_media_position_updated_at = dt_util.utcnow()
 
-        # Shuffle and repeat mode
+        # Shuffle and repeat mode.
+        # For live radio the repeat button is repurposed as a zone/device volume
+        # mode toggle: OFF = device volume only, ALL = zone volume (all members
+        # move together).  The local _zone_volume_mode flag is authoritative for
+        # live radio and is NOT overwritten by server state so that the toggle
+        # persists across state-update callbacks.
         self._attr_shuffle = now_playing.get("shuffle", False)
-        repeat_raw = now_playing.get("repeat", "off")
-        if repeat_raw == "one":
-            self._attr_repeat = RepeatMode.ONE
-        elif repeat_raw == "all":
-            self._attr_repeat = RepeatMode.ALL
+        if is_live_radio:
+            self._attr_repeat = RepeatMode.ALL if self._zone_volume_mode else RepeatMode.OFF
         else:
-            self._attr_repeat = RepeatMode.OFF
+            repeat_raw = now_playing.get("repeat", "off")
+            if repeat_raw == "one":
+                self._attr_repeat = RepeatMode.ONE
+            elif repeat_raw == "all":
+                self._attr_repeat = RepeatMode.ALL
+            else:
+                self._attr_repeat = RepeatMode.OFF
 
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
@@ -209,8 +219,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # stream continues without you).  Regular tracks support Pause.
         # This matches the native Raumfeld app which shows a Stop button for
         # live stations and a Pause button for music tracks.
-        upnp_class_lower = (now_playing.get("classString") or "").lower()
-        if "audiobroadcast" in upnp_class_lower:
+        if is_live_radio:
             features |= MediaPlayerEntityFeature.STOP
         else:
             features |= MediaPlayerEntityFeature.PAUSE
@@ -374,10 +383,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1.
 
-        When grouped, adjusts the zone master (all members move together).
-        When solo, adjusts this device only.
+        Default: controls this device only.
+        When zone-volume mode is active (repeat=ALL on live radio) and
+        the room is grouped, controls all zone members together.
         """
-        if self._zone_members and len(self._zone_members) > 1:
+        if self._zone_volume_mode and self._zone_members and len(self._zone_members) > 1:
             await self._client.set_zone_volume(self._udn, int(volume * 100))
         else:
             await self._client.set_volume(self._udn, int(volume * 100))
@@ -410,9 +420,25 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         await self._client.set_shuffle(self._udn, shuffle)
 
     async def async_set_repeat(self, repeat: RepeatMode) -> None:
-        """Set repeat mode."""
-        _LOGGER.debug("Calling async_set_repeat for %s: %s", self._udn, repeat)
-        await self._client.set_repeat(self._udn, repeat)
+        """Set repeat mode; for live radio repurposed as zone/device volume toggle.
+
+        Live radio — repeat button cycles the volume mode:
+          OFF  → volume slider controls this device only  (default)
+          ALL  → volume slider controls the whole zone
+        HA cycles OFF→ONE→ALL→OFF; ONE is treated as ALL so the button
+        cleanly toggles between OFF and ALL without an intermediate step.
+
+        Regular content — repeat works normally (OFF / ONE / ALL).
+        """
+        upnp_class = (self._upnp_class or "").lower()
+        if "audiobroadcast" in upnp_class:
+            # ONE is treated as ALL: first press (OFF→ONE) immediately activates zone mode.
+            self._zone_volume_mode = repeat in (RepeatMode.ALL, RepeatMode.ONE)
+            self._attr_repeat = RepeatMode.ALL if self._zone_volume_mode else RepeatMode.OFF
+            self.async_write_ha_state()
+        else:
+            self._attr_repeat = repeat
+            await self._client.set_repeat(self._udn, repeat)
 
     async def async_join_players(self, group_members: list[str]) -> None:
         """Join `group_members` to the current entity (master).

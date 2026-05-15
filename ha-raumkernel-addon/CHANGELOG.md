@@ -1,4 +1,28 @@
-## 1.3.1
+## 1.3.2
+
+- Improvement (volume mode toggle via repeat button on live radio):
+  The volume slider defaults to **device-only** control at all times.
+
+  For live radio the repeat button (which is meaningless for a live stream) is
+  repurposed as a zone/device volume mode toggle:
+
+  - Repeat **off** (default) — volume slider controls this device only.
+  - Repeat **all** — volume slider controls the zone master (all grouped
+    speakers move together, like the native Raumfeld app).
+
+  Pressing the repeat button while playing live radio toggles between the two
+  modes.  HA's repeat cycle goes OFF→ONE→ALL→OFF; ONE is silently treated as
+  ALL so the button jumps straight to zone mode on the first press, giving a
+  clean two-state toggle.  The mode is stored locally and persists across
+  device state-update callbacks; it resets to device mode on HA restart.
+
+  For regular music tracks repeat continues to work as before (OFF/ONE/ALL
+  sent to the device).
+
+  The **Device Volume** `number` entity (device page) always controls only
+  this speaker regardless of the toggle state.
+
+
 
 - Improvement (volume slider context-aware behaviour):
   The media-player volume slider now acts on the zone master when the room is
