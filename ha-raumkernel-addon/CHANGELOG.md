@@ -1,4 +1,28 @@
-## 1.2.110
+## 1.3.0
+
+- Fix (volume up on one room appeared to affect the other room):
+  `_extractNowPlaying` was returning `state.Volume` as the `volume` field for every room.
+  `state.Volume` is the **zone-master** volume — the highest absolute volume among all zone
+  members.  When one room's volume was raised above the current master the zone master updated,
+  making the HA slider for every other room appear to jump in sync.
+
+  Fix: per-room volume is now read from `state.RoomVolumes` (e.g.
+  `uuid:TischlerEi=88,uuid:KellerStueberl=22`).  The device-volume slider in HA now tracks each
+  room's individual speaker level independently.  Negative values (artefact of a prior buggy
+  zone-level delta) are clamped to 0.
+
+- Feature (zone/group volume slider):
+  A new `number` entity **Zone Volume** is created for every room alongside the existing
+  `media_player` entity.  It shows the zone-master volume and, when adjusted, calls
+  `setZoneVolume` which routes through the virtual zone renderer — the same behaviour as the
+  native Raumfeld app's group slider: all rooms in the zone move together.  When a room is
+  not in a zone the zone volume equals the device volume.
+
+  - New `number.py` platform in the custom component.
+  - New `setZoneVolume` command in the addon (`RaumkernelHelper.js`, `index.js`).
+  - New `set_zone_volume` method in `api.py`.
+  - `zone_volume` exposed in `extra_state_attributes` of the media player entity.
+
 
 - Fix (changing volume on one room adjusts the whole zone):
   `setVolume` and `setMute` were calling `renderer.setVolume(volume)` on the zone's virtual

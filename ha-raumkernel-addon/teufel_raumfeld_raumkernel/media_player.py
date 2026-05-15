@@ -178,6 +178,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._zone_name = room_data.get("zoneName")
         self._zone_members = room_data.get("zoneMembers", [])
         self._current_zone_udn = room_data.get("currentZoneUdn")
+        self._zone_volume = now_playing.get("zoneVolume", now_playing.get("volume", 0) or 0)
 
         # Supported features
         features = (
@@ -268,6 +269,7 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             "zone_name": self._zone_name,
             "current_zone_udn": self._current_zone_udn,
             "zone_members": self._zone_members,
+            "zone_volume": self._zone_volume,
         }
 
     @property

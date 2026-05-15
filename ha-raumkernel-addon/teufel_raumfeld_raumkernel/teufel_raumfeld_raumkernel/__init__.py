@@ -11,7 +11,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.BUTTON]
+PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.BUTTON, Platform.NUMBER]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

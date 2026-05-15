@@ -1300,6 +1300,22 @@ class RaumkernelHelper {
         if (playMode === 'REPEAT_ONE') repeat = 'one';
         else if (playMode === 'REPEAT_ALL' || playMode === 'RANDOM') repeat = 'all';
 
+        // Per-room volume: when the room is part of a multi-room zone the
+        // zone renderer's Volume property is the zone-master (highest member)
+        // volume, not this room's individual volume.  Read the room-specific
+        // absolute volume from RoomVolumes so that each room's HA slider
+        // reflects only its own speaker level and moves independently of
+        // other zone members.  Negative values (corrupted delta from a prior
+        // zone-level SetVolume) are clamped to 0.
+        const zoneVolume = parseInt(state.Volume) || 0;
+        let roomVolume = zoneVolume;
+        if (room && state.RoomVolumes) {
+            const rvMatch = state.RoomVolumes.match(
+                new RegExp(room.roomUdn + '=([-\\d]+)')
+            );
+            if (rvMatch) roomVolume = Math.max(0, parseInt(rvMatch[1]) || 0);
+        }
+
         return {
             artist: metadata.artist,
             track: metadata.track,
@@ -1310,7 +1326,8 @@ class RaumkernelHelper {
             isPlaying,
             isLoading,
             isMuted: state.Mute === 1,
-            volume: parseInt(state.Volume) || 0,
+            volume: roomVolume,
+            zoneVolume,
             canPlayPause,
             canPlayNext,
             canPlayPrev,
@@ -2052,6 +2069,17 @@ class RaumkernelHelper {
         const physRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
         const renderer = physRenderer || this._getRendererForRoom(room);
         if (renderer) return renderer.setMute(mute);
+    }
+
+    async setZoneVolume(roomIdentifier, volume) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+        // Use the virtual (zone) renderer so that all members of the zone are
+        // adjusted together, matching the native app's group-volume behaviour.
+        // When the room is not in a multi-room zone the zone renderer IS the
+        // physical renderer, so this degrades gracefully to per-room control.
+        const renderer = this._getRendererForRoom(room);
+        if (renderer) return renderer.setVolume(volume);
     }
 
     async enterStandby(roomIdentifier) {

@@ -302,6 +302,10 @@ wss.on('connection', (ws) => {
                     await rkHelper.setVolume(payload.roomUdn, payload.volume);
                     break;
                     
+                case 'setZoneVolume':
+                    await rkHelper.setZoneVolume(payload.roomUdn, payload.volume);
+                    break;
+                    
                 case 'setMute':
                     await rkHelper.setMute(payload.roomUdn, payload.mute);
                     break;
