@@ -1,4 +1,11 @@
-## 1.3.4
+## 1.3.5
+
+- Remove shuffle and repeat buttons from live radio player:
+  `SHUFFLE_SET` and `REPEAT_SET` features are now only advertised for
+  regular track playback.  The radio/broadcast player card shows only the
+  controls that are meaningful for a live stream (play, stop, volume, mute).
+
+
 
 - Revert zone/device volume mode toggle (repeat button repurposing removed):
   The repeat-button-as-zone-volume-toggle introduced in v1.3.2 / v1.3.3 had
