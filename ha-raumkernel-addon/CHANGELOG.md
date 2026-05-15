@@ -1,4 +1,20 @@
-## 1.3.3
+## 1.3.4
+
+- Revert zone/device volume mode toggle (repeat button repurposing removed):
+  The repeat-button-as-zone-volume-toggle introduced in v1.3.2 / v1.3.3 had
+  too many edge cases.  The feature has been removed.
+
+  Volume behaviour is now simple and stable:
+  - Volume slider always controls **this device only** (per-room physical renderer).
+  - Repeat button works normally for all content (OFF / ONE / ALL sent to device).
+  - Shuffle button works normally.
+  - The **Device Volume** `number` entity (device page) continues to provide
+    per-device control independently of any zone grouping.
+
+  The `setZoneVolume` and `setZoneVolumeMode` addon commands remain available
+  for automation use if needed in future.
+
+
 
 - Fix (zone volume mode caused audio to stop / buttons out of sync / repeat stuck):
 
