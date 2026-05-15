@@ -1,3 +1,18 @@
+## 1.2.107
+
+- Fix (zone-join missing from `play()` STOPPED→native path):
+  When a room was in STOPPED state with a `dlna-playsingle://` URI already loaded
+  (e.g. after a stream drop or HA restart), pressing Play in HA called `play()` which
+  took the `STOPPED→native` branch and called `renderer.play()` directly — bypassing
+  the zone-join logic entirely.  Both rooms then ran independent TuneIn sessions for
+  the same station, which is what the zone-join fix was meant to prevent.
+
+  Fix: the `STOPPED→native` branch in `play()` now performs the same zone-join check
+  as `loadSingle()`: if another room is already PLAYING the same station (matched via
+  `room._lastStationId`, which is now set from running kernel metadata), the room joins
+  the existing zone via `zoneManager.connectRoomToZone()` instead of calling
+  `renderer.play()`.  Falls back to native `Play()` on any error.
+
 ## 1.2.106
 
 - Fix (zone-join never triggered because stationId lookup relied solely on stale browse cache):

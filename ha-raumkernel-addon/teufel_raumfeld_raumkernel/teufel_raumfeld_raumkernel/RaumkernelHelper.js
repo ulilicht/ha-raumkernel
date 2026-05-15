@@ -1607,10 +1607,44 @@ class RaumkernelHelper {
             room._resumeAnchorTime    = Date.now();
             room._resumeAnchorTrack   = undefined;
 
-            // Kernel has dlna-playsingle:// — let it manage TuneIn natively.
-            // The kernel calls ebrowse every ~60 s for CDN session renewal and
-            // will play indefinitely without hitting TuneIn rate limits.
+            // Kernel has dlna-playsingle:// — before restarting independently,
+            // check if another room is already PLAYING the same station so we can
+            // join its zone instead of creating a new TuneIn session (which would
+            // add another independent ebrowse cycle and risk rate-limiting).
             if (kernelAvtUri.startsWith('dlna-playsingle://')) {
+                if (room._lastStationId) {
+                    const zoneManager = this._getZoneManager();
+                    if (zoneManager) {
+                        for (const other of this._rooms.values()) {
+                            if (other === room) continue;
+                            if (!other._isLiveStream || !other._lastStationId) continue;
+                            if (other._lastStationId !== room._lastStationId) continue;
+
+                            const otherRenderer = this._getRendererForRoom(other);
+                            const otherState    = otherRenderer?.rendererState?.TransportState;
+                            if (otherState !== 'PLAYING' && otherState !== 'TRANSITIONING') continue;
+
+                            const targetZoneUdn = zoneManager.getZoneUDNFromRoomUDN(other.roomUdn);
+                            if (!targetZoneUdn) continue;
+
+                            console.log(
+                                `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→zone-join)` +
+                                ` for ${room.name} → ${other.name}` +
+                                ` (station s${room._lastStationId}, zone ${targetZoneUdn})`
+                            );
+                            try {
+                                await zoneManager.connectRoomToZone(room.roomUdn, targetZoneUdn, false);
+                                return;
+                            } catch (err) {
+                                console.warn(
+                                    `${LOG_PREFIX.COMMAND} play() zone-join failed for ${room.name}` +
+                                    ` (${err.message}); falling back to native Play()`
+                                );
+                            }
+                            break;
+                        }
+                    }
+                }
                 console.log(
                     `${LOG_PREFIX.COMMAND} play() live stream (STOPPED→native) for ${room.name}`
                 );
