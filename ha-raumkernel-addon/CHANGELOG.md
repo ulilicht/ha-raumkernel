@@ -1,3 +1,29 @@
+## 1.2.110
+
+- Fix (changing volume on one room adjusts the whole zone):
+  `setVolume` and `setMute` were calling `renderer.setVolume(volume)` on the zone's virtual
+  renderer without specifying a room UDN.  The Raumfeld zone renderer interprets this as a
+  zone-level relative change: it takes the current zone-master volume as the reference point
+  and applies the delta to every room in the zone simultaneously.
+
+  Fix: both methods now resolve the physical renderer via
+  `deviceManager.mediaRenderers.get(room.rendererUdn)`.  The physical renderer controls only
+  that one device, so the volume change is isolated to the target room.  Falls back to the
+  zone renderer if no physical renderer is found (e.g. a speaker in deep standby).
+
+- Fix (spurious partial-zone-drop timers fired on initial zone join):
+  When a room first joined a zone it appeared briefly as `STOPPED` in `RoomStates` before
+  the kernel promoted it to `PLAYING`.  The partial-drop auto-recovery code scheduled a
+  rejoin timer even though the room had never been playing in the zone yet, because it
+  didn't check `prevState`.
+
+  Two guards added:
+  1. `prevState === 'PLAYING'` — only schedule a rejoin when the room actually *dropped*
+     from an active stream (not on initial join where `prevState` is `undefined` or
+     `'STOPPED'`).
+  2. `room._partialDropRejoinPending` flag — prevents duplicate timers when multiple
+     subscription callbacks fire within milliseconds for the same state-change event.
+
 ## 1.2.109
 
 - Fix (Kueche stops while TischlerEi keeps playing — partial zone drop not detected or recovered):

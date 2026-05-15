@@ -1111,14 +1111,27 @@ class RaumkernelHelper {
                 // zone and re-joining it via loadSingle, which uses the zone-join logic
                 // to reconnect without interrupting the other rooms that are still
                 // playing.
-                if (state.TransportState === 'PLAYING' &&
-                    room._lastItemId && !room._userStopped) {
+                //
+                // Guard 1: only treat as a drop if the room was previously PLAYING
+                //          (prevState==='PLAYING').  A fresh zone-join starts with
+                //          STOPPED → kernel promotes to PLAYING within ~2 s; that
+                //          initial STOPPED must not trigger a rejoin cycle.
+                // Guard 2: deduplicate multiple subscription callbacks that fire for
+                //          the same state change.  _extractNowPlaying can be called
+                //          several times within a few ms for one physical event;
+                //          _partialDropRejoinPending prevents redundant timers.
+                if (prevState === 'PLAYING' &&
+                    state.TransportState === 'PLAYING' &&
+                    room._lastItemId && !room._userStopped &&
+                    !room._partialDropRejoinPending) {
                     const rejoinItemId = room._lastItemId;
+                    room._partialDropRejoinPending = true;
                     console.log(
                         `${LOG_PREFIX.COMMAND} Partial zone drop for ${room.name}` +
                         ` — scheduling drop+rejoin in 3 s (item ${rejoinItemId})`
                     );
                     setTimeout(async () => {
+                        room._partialDropRejoinPending = false;
                         try {
                             // Verify the room is still stuck (hasn't self-healed).
                             const r2 = this._getRendererForRoom(room);
@@ -2021,13 +2034,23 @@ class RaumkernelHelper {
 
     async setVolume(roomIdentifier, volume) {
         const room = this.findRoom(roomIdentifier);
-        const renderer = this._getRendererForRoom(room);
+        if (!room) return;
+        const deviceManager = this._getDeviceManager();
+        // Use the physical renderer so that setting one room's volume in a
+        // multi-room zone does not affect the other rooms in the zone.
+        // The zone renderer's SetVolume applies a relative delta to ALL members;
+        // the physical renderer only adjusts the one device it controls.
+        const physRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+        const renderer = physRenderer || this._getRendererForRoom(room);
         if (renderer) return renderer.setVolume(volume);
     }
 
     async setMute(roomIdentifier, mute) {
         const room = this.findRoom(roomIdentifier);
-        const renderer = this._getRendererForRoom(room);
+        if (!room) return;
+        const deviceManager = this._getDeviceManager();
+        const physRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+        const renderer = physRenderer || this._getRendererForRoom(room);
         if (renderer) return renderer.setMute(mute);
     }
 
