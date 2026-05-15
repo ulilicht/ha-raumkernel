@@ -153,8 +153,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         is_grouped = len(zone_members) > 1
 
         # Volume: default = this device only.
-        # When the user has activated zone-volume mode (repeat=ALL toggle on live
-        # radio) and the room is grouped, show and control the zone master instead.
+        # When the server broadcasts zoneVolumeMode=True (all zone members
+        # get this flag simultaneously via setZoneVolumeMode) and the room
+        # is grouped, show and control the zone master instead.
+        self._zone_volume_mode = bool(now_playing.get("zoneVolumeMode", False))
+        is_grouped = len(zone_members) > 1
         if self._zone_volume_mode and is_grouped:
             raw_volume = now_playing.get("zoneVolume", now_playing.get("volume", 0) or 0)
         else:
@@ -426,16 +429,16 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
           OFF  → volume slider controls this device only  (default)
           ALL  → volume slider controls the whole zone
         HA cycles OFF→ONE→ALL→OFF; ONE is treated as ALL so the button
-        cleanly toggles between OFF and ALL without an intermediate step.
+        jumps straight to zone mode on the first press (clean toggle).
+        The mode is sent to the addon which syncs it across ALL rooms in
+        the zone so every player card shows the same state.
 
         Regular content — repeat works normally (OFF / ONE / ALL).
         """
         upnp_class = (self._upnp_class or "").lower()
         if "audiobroadcast" in upnp_class:
-            # ONE is treated as ALL: first press (OFF→ONE) immediately activates zone mode.
-            self._zone_volume_mode = repeat in (RepeatMode.ALL, RepeatMode.ONE)
-            self._attr_repeat = RepeatMode.ALL if self._zone_volume_mode else RepeatMode.OFF
-            self.async_write_ha_state()
+            enable = repeat in (RepeatMode.ALL, RepeatMode.ONE)
+            await self._client.set_zone_volume_mode(self._udn, enable)
         else:
             self._attr_repeat = repeat
             await self._client.set_repeat(self._udn, repeat)

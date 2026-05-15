@@ -1,4 +1,40 @@
-## 1.3.2
+## 1.3.3
+
+- Fix (zone volume mode caused audio to stop / buttons out of sync / repeat stuck):
+
+  Three root-cause bugs in v1.3.2 have been fixed:
+
+  1. **"No audio" after zone-volume drag**: The Raumfeld zone renderer's
+     `SetVolume` is delta-based (it subtracts the new value from the current
+     zone-master and applies the difference to every member).  When a member
+     already had a very low volume (e.g. 1) and the delta was large and negative,
+     its volume went negative (stored as −29, clamped to 0 on the device = silent).
+
+     Fix: `setZoneVolume` now computes the delta itself, then applies it to each
+     room's **physical** renderer with explicit `Math.max(0, Math.min(100, …))`
+     clamping.  All members stay in the valid range.
+
+  2. **"Buttons out of sync"**: Each HA media-player entity tracked
+     `_zone_volume_mode` as a local Python flag.  Activating zone mode on
+     TischlerEi left KellerStueberl's repeat button at OFF, making the cards
+     visually inconsistent.
+
+     Fix: mode is now stored on each room object in the addon (`room._zoneVolumeMode`)
+     and broadcast as `nowPlaying.zoneVolumeMode`.  `setZoneVolumeMode` writes the
+     flag to **every room in the zone** before broadcasting, so both cards update
+     to the same repeat state simultaneously.
+
+  3. **"Repeat button stuck / can't switch back"**: `async_set_repeat` was
+     updating local state and relying on `async_write_ha_state()` without
+     any server round-trip.  A concurrent state-update callback could race and
+     restore the old value before the write propagated.
+
+     Fix: `async_set_repeat` for live radio now calls `set_zone_volume_mode` on
+     the server.  The server broadcasts the updated state to all listeners;
+     `update_state` picks it up and writes the correct repeat icon.  No local
+     flag to race against.
+
+
 
 - Improvement (volume mode toggle via repeat button on live radio):
   The volume slider defaults to **device-only** control at all times.

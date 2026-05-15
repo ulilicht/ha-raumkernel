@@ -167,6 +167,10 @@ class RaumfeldApiClient:
         """Set zone/group volume (adjusts all rooms in the zone together)."""
         await self.send_command("setZoneVolume", {"roomUdn": room_udn, "volume": volume})
 
+    async def set_zone_volume_mode(self, room_udn: str, enable: bool) -> None:
+        """Toggle zone/device volume mode for the room's zone."""
+        await self.send_command("setZoneVolumeMode", {"roomUdn": room_udn, "enable": enable})
+
     async def set_mute(self, room_udn: str, mute: bool) -> None:
         """Set mute."""
         await self.send_command("setMute", {"roomUdn": room_udn, "mute": mute})

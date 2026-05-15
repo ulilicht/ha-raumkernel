@@ -1328,6 +1328,7 @@ class RaumkernelHelper {
             isMuted: state.Mute === 1,
             volume: roomVolume,
             zoneVolume,
+            zoneVolumeMode: room?._zoneVolumeMode === true,
             canPlayPause,
             canPlayNext,
             canPlayPrev,
@@ -2074,12 +2075,49 @@ class RaumkernelHelper {
     async setZoneVolume(roomIdentifier, volume) {
         const room = this.findRoom(roomIdentifier);
         if (!room) return;
-        // Use the virtual (zone) renderer so that all members of the zone are
-        // adjusted together, matching the native app's group-volume behaviour.
-        // When the room is not in a multi-room zone the zone renderer IS the
-        // physical renderer, so this degrades gracefully to per-room control.
-        const renderer = this._getRendererForRoom(room);
-        if (renderer) return renderer.setVolume(volume);
+        const zoneUdn = room.zoneUdn;
+        if (!zoneUdn) {
+            // Solo room — fall back to per-device control.
+            return this.setVolume(roomIdentifier, volume);
+        }
+        // The zone renderer's SetVolume is DELTA-based (it subtracts the new
+        // value from the current master and applies the diff to every member).
+        // Using it directly causes members that are already near 0 to go
+        // negative (silent/broken).  Instead we compute the delta ourselves
+        // and apply it per physical renderer so each member is clamped to
+        // the valid [0, 100] range.
+        const zoneRenderer = this._getRendererForRoom(room);
+        const currentMaster = parseInt(zoneRenderer?.rendererState?.Volume) || 0;
+        const delta = volume - currentMaster;
+        if (delta === 0) return;
+
+        const deviceManager = this._getDeviceManager();
+        const promises = [];
+        for (const memberRoom of this._rooms.values()) {
+            if (memberRoom.zoneUdn === zoneUdn && deviceManager) {
+                const physRenderer = deviceManager.mediaRenderers.get(memberRoom.rendererUdn);
+                if (physRenderer) {
+                    const currentVol = parseInt(physRenderer.rendererState?.Volume) || 0;
+                    const newVol = Math.max(0, Math.min(100, currentVol + delta));
+                    promises.push(physRenderer.setVolume(newVol));
+                }
+            }
+        }
+        await Promise.all(promises);
+    }
+
+    async setZoneVolumeMode(roomIdentifier, enable) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+        const zoneUdn = room.zoneUdn;
+        // Sync the mode flag across every room in the zone so all HA entities
+        // reflect the same repeat/volume-mode state simultaneously.
+        for (const r of this._rooms.values()) {
+            if (!zoneUdn || r.zoneUdn === zoneUdn) {
+                r._zoneVolumeMode = Boolean(enable);
+            }
+        }
+        this._broadcastRoomStates();
     }
 
     async enterStandby(roomIdentifier) {
