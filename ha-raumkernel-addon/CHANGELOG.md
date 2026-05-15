@@ -1,3 +1,20 @@
+## 1.2.108
+
+- Fix (stopping TischlerEi also stops Kueche when they share a zone):
+  Once a room joins another room's zone via `connectRoomToZone`, calling `stop()` on
+  the joining room resolved to the shared zone renderer and stopped the entire zone,
+  silencing all rooms in it.
+
+  Fix: `stop()` now checks whether the room belongs to a multi-room zone
+  (`getRoomCountForZoneUDN > 1`).  If so, it calls `zoneManager.dropRoomFromZone()`
+  instead of `renderer.stop()` — this ejects just the stopped room from the zone
+  while the other room(s) continue playing.  Falls back to zone stop on error.
+
+- Note: the `ECONNREFUSED` / `UNSUBSCRIBE_ALL` errors seen during zone-join startup
+  are harmless: they occur when the old standalone zone port is closed by the kernel
+  immediately after the room is moved into the shared zone.  The subscription was
+  already torn down on the kernel side; the error is a cleanup artifact only.
+
 ## 1.2.107
 
 - Fix (zone-join missing from `play()` STOPPED→native path):

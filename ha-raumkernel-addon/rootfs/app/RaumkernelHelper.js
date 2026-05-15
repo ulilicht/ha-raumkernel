@@ -1770,6 +1770,30 @@ class RaumkernelHelper {
             }
         }
 
+        // Multi-room zone guard: if this room is currently sharing a zone with
+        // other rooms (zone-join result), calling renderer.stop() would stop the
+        // entire zone and silence all other rooms in it.  Instead, drop just this
+        // room from the zone — it stops naturally while the others keep playing.
+        const zoneManager = this._getZoneManager();
+        if (zoneManager && room) {
+            const zoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+            if (zoneUdn && zoneManager.getRoomCountForZoneUDN(zoneUdn) > 1) {
+                console.log(
+                    `${LOG_PREFIX.COMMAND} stop() dropping ${room.name} from multi-room zone` +
+                    ` ${zoneUdn} (${zoneManager.getRoomCountForZoneUDN(zoneUdn)} rooms)`
+                );
+                try {
+                    await zoneManager.dropRoomFromZone(room.roomUdn);
+                    return;
+                } catch (err) {
+                    console.warn(
+                        `${LOG_PREFIX.COMMAND} dropRoomFromZone failed for ${room.name}` +
+                        ` (${err.message}); falling back to zone stop`
+                    );
+                }
+            }
+        }
+
         try {
             return await renderer.stop();
         } catch (err) {
