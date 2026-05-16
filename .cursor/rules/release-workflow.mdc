@@ -1,0 +1,53 @@
+---
+description: Release workflow for ha-raumkernel — version files, prepare-build, commit, push
+alwaysApply: true
+---
+
+# Release Workflow
+
+## Version Source of Truth
+`ha-raumkernel-addon/config.yaml` is the **master version file**.
+
+## Correct Steps for a New Version
+
+### 1. Edit code & bump version in config.yaml
+```yaml
+version: "1.X.Y"
+```
+
+### 2. Run prepare-build.sh (ALWAYS — do not skip)
+```bash
+cd /home/holli/BUILD/ha-raumkernel
+./ha-raumkernel-addon/prepare-build.sh
+```
+This script does three things in one shot:
+- Updates `ha-raumkernel-addon/rootfs/app/package.json` and regenerates `package-lock.json` via `npm install --package-lock-only`
+- Updates `custom_components/teufel_raumfeld_raumkernel/manifest.json`
+- Copies the entire integration into `ha-raumkernel-addon/teufel_raumfeld_raumkernel/` (clean copy)
+
+### 3. Update CHANGELOG.md
+Add a `## 1.X.Y` entry at the top of `ha-raumkernel-addon/CHANGELOG.md`.
+
+### 4. Commit ALL changed files, then push
+```bash
+git add -A
+git commit -m "v1.X.Y — <short description>"
+git push
+```
+
+## Files that must all show the same version
+| File | Updated by |
+|------|-----------|
+| `ha-raumkernel-addon/config.yaml` | manual |
+| `ha-raumkernel-addon/rootfs/app/package.json` | `sync-version.sh` (via prepare-build) |
+| `ha-raumkernel-addon/rootfs/app/package-lock.json` | `npm install --package-lock-only` (via prepare-build) |
+| `custom_components/teufel_raumfeld_raumkernel/manifest.json` | `sync-version.sh` (via prepare-build) |
+| `ha-raumkernel-addon/teufel_raumfeld_raumkernel/manifest.json` | `cp` in prepare-build |
+
+## ⚠️ Never do manually what prepare-build.sh does
+Do not manually copy files or run `sync-integration.sh` as a substitute —
+that script has different (and incomplete) behaviour.
+
+## Troubleshooting: "dockerfile is missing" in HA Supervisor
+This is a HA Supervisor data-corruption error unrelated to our code.
+Fix: run `ha supervisor repair` on the HA instance.
