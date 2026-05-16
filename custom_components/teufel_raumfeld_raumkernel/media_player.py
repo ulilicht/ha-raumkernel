@@ -341,11 +341,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         """Turn off the device."""
         _LOGGER.info("Turning off %s (%s)", self.name, self._udn)
 
-        # First pause playback if playing
+        # Stop playback first so the device releases the stream before sleeping
         try:
-            await self.async_media_pause()
+            await self.async_media_stop()
         except Exception as err:
-            _LOGGER.warning("Failed to pause %s before turn off: %s", self.name, err)
+            _LOGGER.warning("Failed to stop %s before turn off: %s", self.name, err)
 
         # Then attempt standby
         try:

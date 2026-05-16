@@ -1880,6 +1880,8 @@ class RaumkernelHelper {
 
     async pause(roomIdentifier) {
         const room = this.findRoom(roomIdentifier);
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
 
         // Freeze the elapsed-time tracker at the current position estimate.
         // Doing this here — when the pause command is received — avoids a race
@@ -1893,8 +1895,7 @@ class RaumkernelHelper {
             room._resumeAnchorTime = null;
         }
 
-
-        if (renderer) return renderer.pause();
+        return renderer.pause();
     }
 
     async stop(roomIdentifier) {

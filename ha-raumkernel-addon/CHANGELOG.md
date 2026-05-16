@@ -1,3 +1,18 @@
+## 1.3.7
+
+- Fix (`ReferenceError: renderer is not defined` crash in `pause()`):
+  The `pause()` function in `RaumkernelHelper.js` was missing
+  `const renderer = this._getRendererForRoom(room)` — the variable was
+  referenced but never declared, so every `pause` command threw a
+  `ReferenceError`.  This was visible in the logs as an unhandled exception
+  whenever `async_turn_off` was called (which internally calls pause before
+  entering standby).
+
+- Fix (`async_turn_off` now calls `stop()` instead of `pause()` before standby):
+  Calling `pause` before entering standby was triggering the bug above.
+  `stop` is also semantically more appropriate here — turning a device off
+  should release the stream rather than hold it in a paused buffer.
+
 ## 1.3.6
 
 - Fix group indication in HA player view when rooms are in a zone together:
