@@ -1,3 +1,19 @@
+## 1.3.8
+
+- Fix (addon update fails with "dockerfile is missing" after HA Supervisor update):
+  HA Supervisor scans recursively for `config.yaml` files in the repository.
+  A copy of the addon's `config.yaml` (same slug, no Dockerfile) had been sitting
+  inside the integration bundle directory since early in the project.  A recent
+  Supervisor update changed which duplicate it resolves first, causing it to pick
+  the bundle copy (no Dockerfile) over the real addon directory — triggering the
+  "dockerfile is missing" error on every update attempt.
+  Fix: renamed to `addon_config_ref.yaml` so Supervisor ignores it.
+  `prepare-build.sh` now explicitly removes any `config.yaml` from the bundle
+  after copying, preventing this from recurring.
+- Fix (`sync-version.sh` sed syntax incompatible with Linux):
+  The `sed -i ''` fallback used macOS BSD syntax; replaced with portable
+  `sed -i` for Linux environments.
+
 ## 1.3.7
 
 - Fix (`ReferenceError: renderer is not defined` crash in `pause()`):
