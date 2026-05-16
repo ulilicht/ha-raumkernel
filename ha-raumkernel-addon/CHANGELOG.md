@@ -1,3 +1,17 @@
+## 1.3.9
+
+- Fix (live radio stream stops unexpectedly and requires manual Play press):
+  The Raumfeld kernel sets `CurrentTransportActions='Play'` after a CDN
+  stream drop but does **not** restart playback on its own — it simply
+  waits for an explicit Play command.  The addon now schedules an automatic
+  `play()` call after every unintentional stream drop so the user no longer
+  has to press Play manually.
+  Back-off: throttled sessions (< 45 s) use an 8 s delay to give TuneIn a
+  brief breathing window; longer sessions restart after 3 s.
+  Auto-restart is skipped when the user intentionally stops the player
+  (`_userStopped` flag) or when a partial zone-drop rejoin is already
+  in progress.
+
 ## 1.3.8
 
 - Fix (addon update fails with "dockerfile is missing" after HA Supervisor update):

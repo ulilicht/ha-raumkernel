@@ -1083,19 +1083,19 @@ class RaumkernelHelper {
                 room._transitioningStartTime = 0;
             }
 
-            // Log when a live-stream session ends and let the Raumfeld kernel
-            // handle its own auto-restart.
+            // The Raumfeld kernel sets CurrentTransportActions='Play' after a live
+            // stream drops but does NOT restart on its own — it just waits.
+            // We must schedule our own auto-restart via play() so the user never
+            // has to manually press Play after a TuneIn CDN drop.
             //
-            // The kernel sets CurrentTransportActions='Play' immediately after a drop
-            // and restarts on its own within ~12–60 s.  Its internal restart uses the
-            // same TuneIn session context (treated by TuneIn as a renewal, not a new
-            // session request), so TuneIn responds faster and with longer CDN tokens
-            // compared to a forced stop()+play() cycle from this integration.
+            // The play() "STOPPED→native" path calls renderer.play() directly
+            // (no stop() first, no new SetAVTransportURI), so TuneIn treats it
+            // as a session renewal rather than a fresh registration.  This avoids
+            // escalating throttle counts that would extend recovery windows.
             //
-            // Calling stop() from here to "suppress" the kernel's restart was
-            // counter-productive: it forced new-session ebrowse calls on every restart,
-            // escalating TuneIn throttle and extending recovery windows to 10+ minutes
-            // instead of the kernel's natural 12–60 s.
+            // Back-off: sessions under 45 s are throttled CDN tokens; wait 8 s
+            // before retrying so TuneIn has a brief breathing window.  Longer
+            // sessions use a 3 s delay for a near-seamless reconnect.
             const isStopped = currState === 'STOPPED' || currState === 'NO_MEDIA_PRESENT';
             if (isStopped && room._isLiveStream === true) {
                 if (prevState === 'PLAYING') {
@@ -1103,7 +1103,60 @@ class RaumkernelHelper {
                         ? (Date.now() - room._lastPlayingTime) : undefined;
                     const ageStr = sessionAge !== undefined
                         ? `${Math.round(sessionAge / 1000)}s` : '?';
-                    console.log(`${LOG_PREFIX.COMMAND} Stream dropped for ${room.name} (session ${ageStr}) — kernel will auto-restart, or press Play`);
+
+                    // Partial zone drop is handled by the rejoin block below.
+                    const isPartialZoneDrop = state.TransportState === 'PLAYING';
+                    const willAutoRestart = !room._userStopped &&
+                        room._lastItemId &&
+                        !isPartialZoneDrop &&
+                        !room._autoRestartPending;
+
+                    if (willAutoRestart) {
+                        const delayMs = sessionAge !== undefined && sessionAge < 45000 ? 8000 : 3000;
+                        const delaySec = Math.round(delayMs / 1000);
+                        room._autoRestartPending = true;
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} Stream dropped for ${room.name}` +
+                            ` (session ${ageStr}) — auto-restart in ${delaySec}s`
+                        );
+                        setTimeout(async () => {
+                            room._autoRestartPending = false;
+                            const r2 = this._getRendererForRoom(room);
+                            if (!r2) return;
+                            const ts2 = r2.rendererState?.TransportState;
+                            if (ts2 === 'PLAYING' || ts2 === 'TRANSITIONING') {
+                                console.log(
+                                    `${LOG_PREFIX.COMMAND} Auto-restart for ${room.name}` +
+                                    ` skipped — already ${ts2}`
+                                );
+                                return;
+                            }
+                            if (room._userStopped) {
+                                console.log(
+                                    `${LOG_PREFIX.COMMAND} Auto-restart for ${room.name}` +
+                                    ` skipped — user stopped`
+                                );
+                                return;
+                            }
+                            try {
+                                console.log(
+                                    `${LOG_PREFIX.COMMAND} Auto-restart: play() for ${room.name}`
+                                );
+                                await this.play(room.roomUdn);
+                            } catch (err) {
+                                console.warn(
+                                    `${LOG_PREFIX.COMMAND} Auto-restart play() failed` +
+                                    ` for ${room.name}: ${err.message}`
+                                );
+                            }
+                        }, delayMs);
+                    } else {
+                        console.log(
+                            `${LOG_PREFIX.COMMAND} Stream dropped for ${room.name}` +
+                            ` (session ${ageStr}) —` +
+                            ` ${room._userStopped ? 'user stopped' : isPartialZoneDrop ? 'partial zone drop (rejoin below)' : 'no item ID, press Play'}`
+                        );
+                    }
                 } else if (prevState === 'TRANSITIONING') {
                     console.log(`${LOG_PREFIX.COMMAND} Stream load failed or stopped for ${room.name}`);
                 }
@@ -1693,9 +1746,8 @@ class RaumkernelHelper {
                             ` — dropping and rejoining zone ${zoneUdn}`
                         );
                         room._userStopped         = false;
+                        room._autoRestartPending  = false;
                         room._lastPlayCommandTime = Date.now();
-                        try {
-                            await zoneManager.dropRoomFromZone(room.roomUdn);
                             await new Promise(r => setTimeout(r, 800));
                             await this.loadSingle(room.roomUdn, room._lastItemId);
                             return;
@@ -1745,6 +1797,7 @@ class RaumkernelHelper {
 
             this._clearSuppressInterval(room);
             room._userStopped         = false;
+            room._autoRestartPending  = false;
             room._lastPlayCommandTime = Date.now();
             room._resumeAnchorSeconds = 0;
             room._resumeAnchorTime    = Date.now();
@@ -1865,6 +1918,7 @@ class RaumkernelHelper {
                     );
                     this._clearSuppressInterval(room);
                     room._userStopped         = false;
+                    room._autoRestartPending  = false;
                     room._lastPlayCommandTime = Date.now();
                     room._resumeAnchorSeconds = 0;
                     room._resumeAnchorTime    = Date.now();
