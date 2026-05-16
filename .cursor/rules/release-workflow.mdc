@@ -48,6 +48,20 @@ git push
 Do not manually copy files or run `sync-integration.sh` as a substitute —
 that script has different (and incomplete) behaviour.
 
+## Files that must stay in sync inside ha-raumkernel-addon/teufel_raumfeld_raumkernel/
+This directory is copied to `/integration` inside the Docker image.
+It must contain a `config.yaml` that is an exact copy of `ha-raumkernel-addon/config.yaml`.
+HA Supervisor uses this file for addon discovery — **do not delete it**.
+
+After `prepare-build.sh`, always verify it is present:
+```bash
+ls ha-raumkernel-addon/teufel_raumfeld_raumkernel/config.yaml
+```
+If missing, restore with:
+```bash
+cp ha-raumkernel-addon/config.yaml ha-raumkernel-addon/teufel_raumfeld_raumkernel/config.yaml
+```
+
 ## Troubleshooting: "dockerfile is missing" in HA Supervisor
 This is a HA Supervisor data-corruption error unrelated to our code.
 Fix: run `ha supervisor repair` on the HA instance.

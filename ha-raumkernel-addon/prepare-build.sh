@@ -12,4 +12,7 @@ echo "Preparing build: copying integration files..."
 rm -rf ./teufel_raumfeld_raumkernel
 cp -r ../custom_components/teufel_raumfeld_raumkernel ./teufel_raumfeld_raumkernel
 
+# HA Supervisor addon discovery requires config.yaml to be present in the bundle
+cp ./config.yaml ./teufel_raumfeld_raumkernel/config.yaml
+
 echo "Done! Ready to build addon."
