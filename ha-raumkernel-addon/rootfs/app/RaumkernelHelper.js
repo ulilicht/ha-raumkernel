@@ -112,6 +112,19 @@ class RaumkernelHelper {
         
         /** @type {Map<string, RoomInfo>} Room registry keyed by RENDERER UDN */
         this._rooms = new Map();
+
+        /** @type {Map<string, boolean>} Source Select capability cache keyed by RENDERER UDN */
+        this._roomCapabilities = new Map();
+
+        /** @type {Map<string, boolean>} Line-in capability cache keyed by RENDERER UDN */
+        this._roomLineInCapabilities = new Map();
+
+        /** @type {Map<string, string>} Current "Source Select" value cache keyed by RENDERER UDN */
+        this._roomCurrentSourceCache = new Map();
+
+        /** @type {Map<string, number>} Timestamp until which a cached "LineIn" source should not be
+         *  overridden by stale URI-based detection (renderer reconnect after Line-in switch) */
+        this._roomLineInGraceUntil = new Map();
         
         /** @type {{isReady: boolean, availableRooms: RoomState[], favourites: []}} */
         this._state = {
@@ -135,6 +148,10 @@ class RaumkernelHelper {
         
         const logPrefixes = ['ERROR', 'WARN ', 'INFO ', 'VERB ', 'DEBUG', 'SILLY'];
         this.raumkernel.logger.on('log', (data) => {
+            // Suppress expected errors during capability detection
+            if (data.log.includes('Source Select') && data.log.includes('GetDeviceSetting') && data.logType === 0) {
+                 return;
+            }
             const prefix = logPrefixes[data.logType] || `LVL${data.logType}`;
             console.log(`[RK] [${prefix}] ${data.log}`);
         });
@@ -150,12 +167,18 @@ class RaumkernelHelper {
                      console.log(`${LOG_PREFIX.REGISTRY} Connected to fixed host: ${this.raumkernel.getSettings().raumfeldHost}`);
                 }
                 this._refreshRoomRegistry();
-                
+
                 // Process initial zone state
                 const zoneManager = this._getZoneManager();
                 if (zoneManager && zoneManager.zoneState) {
                     console.log(`${LOG_PREFIX.REGISTRY} Processing initial zone state`);
                     this._handleZoneStateChange(zoneManager.zoneState);
+                }
+
+                // Periodically refresh the "Source Select" value for soundbars/sounddecks
+                // to pick up changes made outside of HA (e.g. TV auto-switching to ARC).
+                if (!this._sourcePollInterval) {
+                    this._sourcePollInterval = setInterval(() => this._pollCurrentSources(), 30000);
                 }
             }
         });
@@ -220,6 +243,9 @@ class RaumkernelHelper {
             
             console.log(`${LOG_PREFIX.REGISTRY} Added: ${roomInfo.name} ` +
                 `(room: ${roomInfo.roomUdn}, renderer: ${roomInfo.rendererUdn})`);
+            
+            // Detect capabilities if getting a new room
+            this._detectCapabilities(rendererUdn, renderer);
         }
 
         this._broadcastRoomStates();
@@ -241,7 +267,9 @@ class RaumkernelHelper {
             rendererUdn,
             zoneUdn: null,
             zoneMembers: [roomUdn],
-            zoneName: null
+            zoneName: null,
+            sourceSwitchingSupported: this._roomCapabilities.get(rendererUdn) || false,
+            lineInSupported: this._roomLineInCapabilities.get(rendererUdn) || false
         };
     }
 
@@ -314,6 +342,8 @@ class RaumkernelHelper {
                 currentZoneUdn: room.zoneUdn, // Alias for compatibility
                 zoneName: room.zoneName,
                 zoneMembers: room.zoneMembers,
+                sourceSwitchingSupported: room.sourceSwitchingSupported || false,
+                lineInSupported: room.lineInSupported || false,
                 isPlaying: nowPlaying.isPlaying,
                 nowPlaying
             });
@@ -584,9 +614,26 @@ class RaumkernelHelper {
         };
 
         const durationSeconds = parseToSeconds(state.CurrentTrackDuration);
-        const positionSeconds = typeof state.RelativeTimePosition === 'number' 
-            ? state.RelativeTimePosition 
+        const positionSeconds = typeof state.RelativeTimePosition === 'number'
+            ? state.RelativeTimePosition
             : parseToSeconds(state.RelativeTimePosition);
+
+        // The "Line-in" source is set on the PHYSICAL renderer (via loadLineIn),
+        // but nowPlaying may be derived from the ZONE renderer, which doesn't
+        // reflect it. Check both URIs when detecting the current source.
+        let physicalUri = '';
+        if (room) {
+            const deviceManager = this._getDeviceManager();
+            const physicalRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+            physicalUri = physicalRenderer?.rendererState?.AVTransportURI || '';
+        }
+
+        const currentSource = this._getCurrentSourceForRoom(
+            room,
+            state.AVTransportURI || metadata.uri || '',
+            metadata,
+            physicalUri
+        );
 
         return {
             artist: metadata.artist,
@@ -606,8 +653,71 @@ class RaumkernelHelper {
             durationSeconds,
             position: this._getPositionForRoom(room, state.RelativeTimePosition || 0),
             positionSeconds: this._getPositionForRoom(room, positionSeconds),
-            powerState
+            powerState,
+            currentSource
         };
+    }
+
+    /**
+     * Determines the current input source for a room.
+     * - Devices with "Source Select" (soundbars/sounddecks): cached raw value
+     *   ("Raumfeld", "LineIn", "OpticalIn", "TV_ARC"), defaulting to "Raumfeld".
+     * - Other devices: derived from the current AVTransportURI.
+     * @param {RoomInfo|null} room
+     * @param {string} uri
+     * @returns {string}
+     */
+    _getCurrentSourceForRoom(room, uri, metadata = {}, physicalUri = '') {
+        if (room?.sourceSwitchingSupported) {
+            return this._roomCurrentSourceCache.get(room.rendererUdn) || 'Raumfeld';
+        }
+
+        const lowerUri = uri.toLowerCase();
+        const lowerPhysicalUri = physicalUri.toLowerCase();
+        const title = (metadata.track || '').toLowerCase();
+
+        const matchesLineIn = (u) => u.startsWith('raumfeld:linein')
+            || u.startsWith('raumfeld-line-in')
+            || u.includes('linein')
+            || u.includes('line-in')
+            || u.includes('line%20in')
+            || u.includes('/line in/');
+
+        let detected = null;
+
+        const isLineIn = matchesLineIn(lowerUri)
+            || matchesLineIn(lowerPhysicalUri)
+            || title.includes('line in')
+            || title.includes('line-in');
+
+        if (isLineIn) {
+            detected = 'LineIn';
+        } else if (lowerUri.includes('spotifyconnect') || lowerUri.startsWith('spotify:')) {
+            detected = 'Spotify';
+        } else if (lowerUri.includes('tunein')) {
+            detected = 'Radio';
+        } else if (uri) {
+            detected = 'Raumfeld';
+        }
+
+        // Just after switching to Line-in, the renderer disconnects/reconnects and may
+        // briefly report a stale "Raumfeld" URI. Don't let that override "LineIn"
+        // during the grace window.
+        if (detected === 'Raumfeld' && room?.rendererUdn) {
+            const graceUntil = this._roomLineInGraceUntil.get(room.rendererUdn) || 0;
+            if (Date.now() < graceUntil && this._roomCurrentSourceCache.get(room.rendererUdn) === 'LineIn') {
+                return 'LineIn';
+            }
+        }
+
+        // While transitioning, AVTransportURI can briefly become empty.
+        // Keep the previously detected source instead of falling back to 'Raumfeld'.
+        if (detected && room?.rendererUdn) {
+            this._roomCurrentSourceCache.set(room.rendererUdn, detected);
+            return detected;
+        }
+
+        return (room?.rendererUdn && this._roomCurrentSourceCache.get(room.rendererUdn)) || 'Raumfeld';
     }
 
     /**
@@ -863,6 +973,39 @@ class RaumkernelHelper {
         }
     }
 
+    async enterEcoStandby(roomIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        console.log(`${LOG_PREFIX.COMMAND} Entering eco/automatic standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+
+        try {
+            // We must target the physical renderer for standby
+            const deviceManager = this._getDeviceManager();
+            const renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
+
+            if (renderer) {
+                if (renderer.enterAutomaticStandby) {
+                    await renderer.enterAutomaticStandby();
+                    console.log(`${LOG_PREFIX.COMMAND} Successfully entered eco/automatic standby for ${room.name}`);
+
+                    // Wait a moment for the renderer state to update
+                    await this._delay(500);
+
+                    // Broadcast updated state immediately
+                    this._broadcastRoomStates();
+                } else {
+                     console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterAutomaticStandby`);
+                }
+            } else {
+                 console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
+            }
+        } catch (err) {
+             console.error(`${LOG_PREFIX.COMMAND} Failed to enter eco/automatic standby for ${room.name}: ${err.message}`);
+             throw err; // Re-throw so caller knows it failed
+        }
+    }
+
     // ========================================================================
     // GROUPING COMMANDS
     // ========================================================================
@@ -1003,6 +1146,71 @@ class RaumkernelHelper {
                 console.error(`${LOG_PREFIX.COMMAND} leaveGroup failed: ${err.message}`);
                 throw err;
             }
+        }
+    }
+
+    async setRoomSource(roomIdentifier, source) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        // "Source Select" (LineIn/OpticalIn/TV_ARC/...) is implemented by the
+        // physical room renderer's RenderingControl service, not by the virtual
+        // zone renderer. Always target the physical renderer directly.
+        const deviceManager = this._getDeviceManager();
+        const renderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+
+        if (renderer?.upnpClient) {
+            console.log(`${LOG_PREFIX.COMMAND} Setting source for ${room.name} to ${source}`);
+            try {
+                await new Promise((resolve, reject) => {
+                    renderer.upnpClient.callAction(
+                        "urn:upnp-org:serviceId:RenderingControl",
+                        "SetDeviceSetting",
+                        { InstanceID: 0, Name: "Source Select", Value: source },
+                        (err, res) => err ? reject(err) : resolve(res)
+                    );
+                });
+                this._roomCurrentSourceCache.set(room.rendererUdn, source);
+                this._broadcastRoomStates();
+            } catch (err) {
+                 console.error(`${LOG_PREFIX.COMMAND} Failed to set source for ${room.name}: ${err.message}`);
+                 // We don't throw here to avoid crashing the add-on, but we log it.
+                 // This is expected for devices that don't support "Source Select" (e.g. Speakers)
+            }
+        } else {
+             console.warn(`${LOG_PREFIX.COMMAND} Renderer for ${room.name} has no upnpClient`);
+        }
+    }
+
+    /**
+     * Switches a room's playback to its physical Line-in input.
+     * Used for devices that don't support "Source Select" but do have a
+     * Line-in port (lineInSupported).
+     * @param {string} roomIdentifier
+     */
+    async setRoomLineIn(roomIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        const renderer = await this._ensureVirtualRenderer(room);
+
+        if (renderer?.loadLineIn) {
+            console.log(`${LOG_PREFIX.COMMAND} Switching ${room.name} to Line-in`);
+            try {
+                await renderer.loadLineIn(room.roomUdn);
+                if (room.rendererUdn) {
+                    this._roomCurrentSourceCache.set(room.rendererUdn, 'LineIn');
+                    // The renderer disconnects/reconnects after switching to Line-in,
+                    // and may briefly report stale (non-Line-in) URIs. Protect the
+                    // "LineIn" source from being overridden during that window.
+                    this._roomLineInGraceUntil.set(room.rendererUdn, Date.now() + 10000);
+                }
+                this._broadcastRoomStates();
+            } catch (err) {
+                console.error(`${LOG_PREFIX.COMMAND} Failed to switch ${room.name} to Line-in: ${err.message}`);
+            }
+        } else {
+            console.warn(`${LOG_PREFIX.COMMAND} No virtual renderer with loadLineIn for ${room.name}`);
         }
     }
 
@@ -1197,6 +1405,123 @@ class RaumkernelHelper {
         }
 
         return items;
+    }
+
+    // ========================================================================
+    // CAPABILITY DETECTION
+    // ========================================================================
+
+    /**
+     * Refreshes the cached "Source Select" value for all rooms that support it,
+     * and broadcasts an update if any value changed.
+     */
+    async _pollCurrentSources() {
+        const deviceManager = this._getDeviceManager();
+        if (!deviceManager) return;
+
+        let changed = false;
+        for (const room of this._rooms.values()) {
+            if (!room.sourceSwitchingSupported) continue;
+
+            const renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
+            if (!renderer?.upnpClient) continue;
+
+            try {
+                const res = await new Promise((resolve, reject) => {
+                    renderer.upnpClient.callAction(
+                        "urn:upnp-org:serviceId:RenderingControl",
+                        "GetDeviceSetting",
+                        { InstanceID: 0, Name: "Source Select" },
+                        (err, res) => err ? reject(err) : resolve(res)
+                    );
+                });
+                if (res?.Value && this._roomCurrentSourceCache.get(room.rendererUdn) !== res.Value) {
+                    this._roomCurrentSourceCache.set(room.rendererUdn, res.Value);
+                    changed = true;
+                }
+            } catch {
+                // Ignore transient errors; will retry on next poll.
+            }
+        }
+
+        if (changed) this._broadcastRoomStates();
+    }
+
+    async _detectCapabilities(rendererUdn, renderer) {
+        if (!renderer?.upnpClient) return;
+        if (this._roomCapabilities.has(rendererUdn)) return;
+
+        console.log(`${LOG_PREFIX.REGISTRY} detectCapabilities for ${rendererUdn}...`);
+        try {
+            // Probe for Source Select capability
+            const res = await new Promise((resolve, reject) => {
+                renderer.upnpClient.callAction(
+                    "urn:upnp-org:serviceId:RenderingControl",
+                    "GetDeviceSetting",
+                    { InstanceID: 0, Name: "Source Select" },
+                    (err, res) => err ? reject(err) : resolve(res)
+                );
+            });
+            // If it doesn't throw, it's supported
+            this._roomCapabilities.set(rendererUdn, true);
+            if (res?.Value) this._roomCurrentSourceCache.set(rendererUdn, res.Value);
+            console.log(`${LOG_PREFIX.REGISTRY} ${rendererUdn} supports Source Select`);
+        } catch {
+            // 404/500 means not supported
+            this._roomCapabilities.set(rendererUdn, false);
+            console.log(`${LOG_PREFIX.REGISTRY} ${rendererUdn} does NOT support Source Select`);
+        }
+
+        // Probe for a physical Line-in input. Devices that support "Source Select"
+        // already cover Line-in via that mechanism, so only check standalone
+        // Line-in for devices without it.
+        if (!this._roomCapabilities.get(rendererUdn)) {
+            this._roomLineInCapabilities.set(rendererUdn, await this._probeLineIn(renderer));
+            console.log(`${LOG_PREFIX.REGISTRY} ${rendererUdn} ` +
+                `${this._roomLineInCapabilities.get(rendererUdn) ? "supports" : "does NOT support"} Line-in`);
+        } else {
+            this._roomLineInCapabilities.set(rendererUdn, false);
+        }
+
+        // Trigger a state update to reflect the new capability
+        const room = this._rooms.get(rendererUdn);
+        if (room) {
+            room.sourceSwitchingSupported = this._roomCapabilities.get(rendererUdn);
+            room.lineInSupported = this._roomLineInCapabilities.get(rendererUdn);
+            this._broadcastRoomStates();
+        }
+    }
+
+    /**
+     * Probes a renderer for a physical Line-in input via GetLineInStreamURL.
+     * The device's UPnP server can drop the connection ("socket hang up") if
+     * hit again too soon after a previous call, so retry once after a delay.
+     * @param {*} renderer
+     * @returns {Promise<boolean>}
+     */
+    async _probeLineIn(renderer) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                await new Promise((resolve, reject) => {
+                    renderer.upnpClient.callAction(
+                        "urn:upnp-org:serviceId:RenderingControl",
+                        "GetLineInStreamURL",
+                        {},
+                        (err, res) => err ? reject(err) : resolve(res)
+                    );
+                });
+                return true;
+            } catch (err) {
+                if (/socket hang up/i.test(err?.message || "")) {
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+                // Any other error (e.g. "Line-In stream is not available (404)")
+                // means the device genuinely has no Line-in.
+                return false;
+            }
+        }
+        return false;
     }
 
     // ========================================================================

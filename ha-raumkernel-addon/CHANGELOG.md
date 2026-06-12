@@ -1,3 +1,13 @@
+## 1.2.14
+
+- Add `selectSource` support for Soundbars and Sounddecks (TV_ARC, OpticalIn).
+- Add Line-in switching for devices that don't support `Source Select` but have a physical Line-in input (e.g. Stereo M/L/R speakers).
+- Add a separate "Eco mode" button per room, which puts the device into automatic standby (`EnterAutomaticStandby`) without affecting the existing "Off" button (`EnterManualStandby`).
+- Add two new sensor entities per room: "Power status" (`Off` / `On` / `ECO mode`) and "Input" (current source: Streaming, Line-in, Optical, TV, Spotify, Radio).
+- Track and broadcast the current "Source Select" value for soundbars/sounddecks, with periodic refresh to detect external changes (e.g. TV auto-switching to ARC).
+
+Credits to contributor Simanias
+
 ## 1.2.13
 
 - Fix track images which are hosted on Raumfeld devices (e.g. Local music, Tidal) not showing up.
