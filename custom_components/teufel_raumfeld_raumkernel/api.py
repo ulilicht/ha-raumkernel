@@ -118,6 +118,11 @@ class RaumfeldApiClient:
         """Register a message listener."""
         self._listeners.append(listener)
 
+    def unregister_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        """Unregister a message listener."""
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
     async def send_command(self, command: str, payload: dict[str, Any]) -> None:
         """Send a command."""
         if not self._ws or self._ws.closed:

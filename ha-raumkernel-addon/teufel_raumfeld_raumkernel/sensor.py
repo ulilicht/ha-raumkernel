@@ -89,6 +89,10 @@ class RaumfeldSensorBase(SensorEntity):
         """Run when this Entity has been added to HA."""
         self._client.register_listener(self._handle_event)
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when this Entity is being removed from HA."""
+        self._client.unregister_listener(self._handle_event)
+
     @callback
     def _handle_event(self, data: dict[str, Any]) -> None:
         """Handle incoming events."""

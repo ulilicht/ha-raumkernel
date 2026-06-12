@@ -200,8 +200,6 @@ const installedIntegrationVersion = integrationManager.getInstalledVersion() || 
 
 console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion} integration=${installedIntegrationVersion}`);
 
-console.log(`Startup: addon=${addonVersion} node-raumkernel=${nodeRaumkernelVersion} integration=${installedIntegrationVersion}`);
-
 // console.log(\`WebSocket server started on port \${PORT}\`); // Logged by server.listen callback now
 
 // Broadcast state to all connected clients
@@ -351,7 +349,7 @@ wss.on('connection', (ws) => {
                             console.log(`Rebooting device at ${host} (${roomInfo.name})`);
                             try {
                                 const { exec } = await import('child_process');
-                                exec(`ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@${host} /sbin/reboot`, (error) => {
+                                exec(`ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=5 root@${host} /sbin/reboot`, (error) => {
                                     if (error) {
                                         console.error(`Reboot failed for ${host}:`, error.message);
                                         return;

@@ -1448,6 +1448,7 @@ class RaumkernelHelper {
     }
 
     async _detectCapabilities(rendererUdn, renderer) {
+        if (!renderer?.upnpClient) return;
         if (this._roomCapabilities.has(rendererUdn)) return;
 
         console.log(`${LOG_PREFIX.REGISTRY} detectCapabilities for ${rendererUdn}...`);
