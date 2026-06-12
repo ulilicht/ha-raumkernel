@@ -36,6 +36,7 @@ async def async_setup_entry(
                 if room["udn"] not in known_udns:
                     known_udns.add(room["udn"])
                     new_entities.append(RaumfeldRebootButton(client, room))
+                    new_entities.append(RaumfeldEcoModeButton(client, room))
 
             if new_entities:
                 async_add_entities(new_entities)
@@ -47,6 +48,7 @@ async def async_setup_entry(
                 if room["udn"] not in known_udns:
                     known_udns.add(room["udn"])
                     new_entities.append(RaumfeldRebootButton(client, room))
+                    new_entities.append(RaumfeldEcoModeButton(client, room))
             if new_entities:
                 async_add_entities(new_entities)
 
@@ -80,3 +82,28 @@ class RaumfeldRebootButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self._client.reboot(self._room_udn)
+
+
+class RaumfeldEcoModeButton(ButtonEntity):
+    """Representation of a Raumfeld eco-mode (automatic standby) button."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:leaf"
+    _attr_has_entity_name = True
+
+    def __init__(self, client: RaumfeldApiClient, room_data: dict[str, Any]) -> None:
+        """Initialize the button."""
+        self._client = client
+        self._room_udn = room_data["udn"]
+        self._attr_name = "Eco mode"
+        self._attr_unique_id = f"{self._room_udn}_eco_mode"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._room_udn)},
+            "name": room_data.get("name"),
+            "manufacturer": "Teufel",
+            "model": "Raumfeld Room",
+        }
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        await self._client.enter_eco_standby(self._room_udn)

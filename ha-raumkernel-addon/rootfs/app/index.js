@@ -298,6 +298,14 @@ wss.on('connection', (ws) => {
                     await rkHelper.load(payload.roomUdn, payload.url);
                     break;
 
+                case 'selectSource':
+                    if (payload.source === 'Line-in') {
+                        await rkHelper.setRoomLineIn(payload.room);
+                    } else {
+                        await rkHelper.setRoomSource(payload.room, payload.source);
+                    }
+                    break;
+
                 case 'browse': {
                     const items = await rkHelper.browse(payload.objectId);
                     ws.send(JSON.stringify({ 
@@ -324,6 +332,10 @@ wss.on('connection', (ws) => {
 
                 case 'enterStandby':
                     await rkHelper.enterStandby(payload.roomUdn);
+                    break;
+
+                case 'enterEcoStandby':
+                    await rkHelper.enterEcoStandby(payload.roomUdn);
                     break;
 
                 case 'reboot': {

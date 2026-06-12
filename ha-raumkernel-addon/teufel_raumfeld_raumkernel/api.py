@@ -209,6 +209,10 @@ class RaumfeldApiClient:
         """Enter standby."""
         await self.send_command("enterStandby", {"roomUdn": room_udn})
 
+    async def enter_eco_standby(self, room_udn: str) -> None:
+        """Enter eco/automatic standby."""
+        await self.send_command("enterEcoStandby", {"roomUdn": room_udn})
+
     async def play_system_sound(self, room_udn: str, sound_id: str) -> None:
         """Play system sound."""
         await self.send_command(
@@ -226,3 +230,7 @@ class RaumfeldApiClient:
     async def leave_group(self, room_udn: str) -> None:
         """Leave a zone (become standalone)."""
         await self.send_command("leaveGroup", {"roomUdn": room_udn})
+
+    async def select_source(self, room_udn: str, source: str) -> None:
+        """Select input source."""
+        await self.send_command("selectSource", {"room": room_udn, "source": source})

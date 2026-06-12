@@ -166,6 +166,13 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._zone_members = room_data.get("zoneMembers", [])
         self._current_zone_udn = room_data.get("currentZoneUdn")
 
+        # Capabilities
+        # Default to False if not present (older add-on versions)
+        self._source_switching_supported = room_data.get(
+            "sourceSwitchingSupported", False
+        )
+        self._line_in_supported = room_data.get("lineInSupported", False)
+
         # Supported features
         features = (
             MediaPlayerEntityFeature.PLAY
@@ -179,6 +186,9 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.TURN_ON
             | MediaPlayerEntityFeature.SEEK
         )
+
+        if self._source_switching_supported or self._line_in_supported:
+            features |= MediaPlayerEntityFeature.SELECT_SOURCE
 
         if now_playing.get("canPlayNext"):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
@@ -231,6 +241,32 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             return MediaType.MUSIC
 
         return None
+
+    # Friendly display names for the raw "Source Select" values reported/accepted
+    # by Soundbars and Sounddecks.
+    _SOURCE_DISPLAY_TO_RAW = {
+        "Streaming": "Raumfeld",
+        "Line-in": "LineIn",
+        "Optical": "OpticalIn",
+        "TV": "TV_ARC",
+    }
+    _SOURCE_RAW_TO_DISPLAY = {v: k for k, v in _SOURCE_DISPLAY_TO_RAW.items()}
+
+    @property
+    def source_list(self) -> list[str] | None:
+        """Return the list of available input sources."""
+        if getattr(self, "_source_switching_supported", False):
+            # Hardcoded superset of sources. Add-on handles support checks.
+            return ["Streaming", "Line-in", "Optical", "TV"]
+        if getattr(self, "_line_in_supported", False):
+            return ["Line-in"]
+        return None
+
+    async def async_select_source(self, source: str) -> None:
+        """Select input source."""
+        if getattr(self, "_source_switching_supported", False):
+            source = self._SOURCE_DISPLAY_TO_RAW.get(source, source)
+        await self._client.select_source(self._udn, source)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
