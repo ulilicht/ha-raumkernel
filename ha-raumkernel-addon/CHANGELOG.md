@@ -1,3 +1,7 @@
+## 1.2.15
+
+- Fix track position and seek tracking, ensuring playing offset and seek targets are correctly displayed and retained in Home Assistant.
+
 ## 1.2.14
 
 - Add `selectSource` support for Soundbars and Sounddecks (TV_ARC, OpticalIn).
