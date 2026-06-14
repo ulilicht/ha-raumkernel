@@ -48,6 +48,12 @@ To bundle the current state of the integration into the addon folder (required b
 ./ha-raumkernel-addon/prepare-build.sh
 ```
 
+## Beta versions 
+
+There is a branch "beta" which is used for testing pre-releases. It can be added to home-assistant as an extra repo by adding https://github.com/ulilicht/ha-raumkernel#beta  
+
+Beta versions can be indicated by appending -beta.X to the version number in `ha-raumkernel-addon/config.yaml`. Example: 1.2.15-beta.1. 
+
 ## Developer Mode
 
 The addon includes a **Developer Mode** option in `config.yaml`:
