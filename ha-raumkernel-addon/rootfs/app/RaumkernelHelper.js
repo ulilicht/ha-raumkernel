@@ -644,7 +644,7 @@ class RaumkernelHelper {
             classString: metadata.classString,
             isPlaying,
             isLoading,
-            isMuted: state.Mute === 1,
+            isMuted: state.Mute === 1 || state.Mute === '1' || state.Mute === true,
             volume: parseInt(state.Volume) || 0,
             canPlayPause,
             canPlayNext,
