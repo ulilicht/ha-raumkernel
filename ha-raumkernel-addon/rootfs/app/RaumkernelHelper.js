@@ -29,6 +29,7 @@
 
 import { JSDOM } from 'jsdom';
 import * as RaumkernelLib from 'node-raumkernel';
+import { EventEmitter } from 'events';
 
 // ============================================================================
 // TYPE DEFINITIONS (JSDoc for IDE support)
@@ -99,8 +100,9 @@ const LOG_PREFIX = {
 // MAIN CLASS
 // ============================================================================
 
-class RaumkernelHelper {
+class RaumkernelHelper extends EventEmitter {
     constructor() {
+        super();
         /** @type {RaumkernelLib.Raumkernel} */
         this.raumkernel = new RaumkernelLib.Raumkernel();
 
@@ -195,9 +197,20 @@ class RaumkernelHelper {
         this.raumkernel.on('rendererStateChanged', () => {
             this._broadcastRoomStates();
         });
+
+        this.raumkernel.on('rendererStateKeyValueChanged', (mediaRenderer, key, oldValue, newValue) => {
+            if ((key === 'TransportState' && newValue === 'PLAYING') || 
+                (key === 'CurrentTrackTitle') || 
+                (key === 'CurrentTrackMetaData')) {
+                setTimeout(() => {
+                    this._pollPositionForRenderer(mediaRenderer);
+                }, 500);
+            }
+        });
     }
 
     _resetState() {
+        this._stopPositionPolling();
         this._state = { isReady: false, availableRooms: [], favourites: [] };
         this._rooms.clear();
     }
@@ -351,6 +364,80 @@ class RaumkernelHelper {
 
         rooms.sort((a, b) => a.name.localeCompare(b.name));
         this._state.availableRooms = rooms;
+
+        this.emit('roomStatesUpdated', this._state);
+
+        // Start or stop position polling based on active playback
+        const anyPlaying = rooms.some(r => r.isPlaying);
+        if (anyPlaying) {
+            this._startPositionPolling();
+        } else {
+            this._stopPositionPolling();
+        }
+    }
+
+    _startPositionPolling() {
+        if (this._positionPollInterval) return;
+        console.log(`${LOG_PREFIX.REGISTRY} Starting playback position polling loop`);
+        this._positionPollInterval = setInterval(() => this._pollPlaybackPositions(), 5000);
+        this._pollPlaybackPositions();
+    }
+
+    _stopPositionPolling() {
+        if (!this._positionPollInterval) return;
+        console.log(`${LOG_PREFIX.REGISTRY} Stopping playback position polling loop`);
+        clearInterval(this._positionPollInterval);
+        this._positionPollInterval = null;
+    }
+
+    _pollPlaybackPositions() {
+        const deviceManager = this._getDeviceManager();
+        if (!deviceManager) return;
+
+        const playingRenderers = new Map();
+
+        for (const room of this._rooms.values()) {
+            const renderer = this._getRendererForRoom(room);
+            if (renderer && renderer.rendererState?.TransportState === 'PLAYING') {
+                playingRenderers.set(renderer.udn(), renderer);
+            }
+        }
+
+        if (playingRenderers.size === 0) {
+            this._stopPositionPolling();
+            return;
+        }
+
+        for (const renderer of playingRenderers.values()) {
+            renderer.getPositionInfo().then((posInfo) => {
+                if (posInfo && posInfo.RelTime) {
+                    renderer.rendererState.RelativeTimePosition = posInfo.RelTime;
+                    if (posInfo.TrackDuration && posInfo.TrackDuration !== '00:00:00') {
+                        renderer.rendererState.CurrentTrackDuration = posInfo.TrackDuration;
+                    }
+                    this._broadcastRoomStates();
+                }
+            }).catch(() => {
+                // Ignore errors
+            });
+        }
+    }
+
+    async _pollPositionForRenderer(mediaRenderer) {
+        if (!mediaRenderer) return;
+        try {
+            if (mediaRenderer.rendererState?.TransportState !== 'PLAYING') return;
+            const posInfo = await mediaRenderer.getPositionInfo();
+            if (posInfo && posInfo.RelTime) {
+                mediaRenderer.rendererState.RelativeTimePosition = posInfo.RelTime;
+                if (posInfo.TrackDuration && posInfo.TrackDuration !== '00:00:00') {
+                    mediaRenderer.rendererState.CurrentTrackDuration = posInfo.TrackDuration;
+                }
+                this._broadcastRoomStates();
+            }
+        } catch {
+            // Ignore errors
+        }
     }
 
     // ========================================================================
