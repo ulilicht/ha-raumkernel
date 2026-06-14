@@ -145,8 +145,18 @@ class RaumfeldPowerStatusSensor(RaumfeldSensorBase):
 class RaumfeldInputSensor(RaumfeldSensorBase):
     """Sensor showing the current input source."""
 
-    _attr_icon = "mdi:import"
     _attr_name = "Input"
+
+    # Icons for each raw "Source Select" / current source value.
+    _SOURCE_ICONS = {
+        "Raumfeld": "mdi:cast-audio",
+        "LineIn": "mdi:audio-input-rca",
+        "OpticalIn": "mdi:toslink",
+        "TV_ARC": "mdi:hdmi-port",
+        "Spotify": "mdi:spotify",
+        "Radio": "mdi:radio",
+    }
+    _DEFAULT_ICON = "mdi:import"
 
     def __init__(self, client: RaumfeldApiClient, room_data: dict[str, Any]) -> None:
         """Initialize."""
@@ -163,3 +173,4 @@ class RaumfeldInputSensor(RaumfeldSensorBase):
         self._attr_native_value = _SOURCE_RAW_TO_DISPLAY.get(
             current_source, current_source
         )
+        self._attr_icon = self._SOURCE_ICONS.get(current_source, self._DEFAULT_ICON)

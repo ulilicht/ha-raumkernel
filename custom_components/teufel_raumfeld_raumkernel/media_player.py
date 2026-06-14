@@ -151,6 +151,19 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_image_url = now_playing.get("image")
         self._attr_media_content_id = now_playing.get("uri")
 
+        # When there's no album art (e.g. Line-in, Optical, TV), show an icon
+        # and the source name instead of a blank media player.
+        current_source = now_playing.get("currentSource", "Raumfeld")
+        source_icon = self._SOURCE_ICONS.get(current_source)
+        if not self._attr_media_image_url and source_icon:
+            self._attr_icon = source_icon
+            if not self._attr_media_title:
+                self._attr_media_title = self._SOURCE_RAW_TO_DISPLAY.get(
+                    current_source, current_source
+                )
+        else:
+            self._attr_icon = "mdi:speaker-multiple"
+
         # Store UPnP class for media_content_type property
         self._upnp_class = now_playing.get("classString", "")
 
@@ -255,6 +268,14 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         "TV": "TV_ARC",
     }
     _SOURCE_RAW_TO_DISPLAY = {v: k for k, v in _SOURCE_DISPLAY_TO_RAW.items()}
+
+    # Icons shown in place of album art when no media image is available
+    # (e.g. external inputs without track metadata).
+    _SOURCE_ICONS = {
+        "LineIn": "mdi:audio-input-rca",
+        "OpticalIn": "mdi:toslink",
+        "TV_ARC": "mdi:hdmi-port",
+    }
 
     @property
     def source_list(self) -> list[str] | None:
