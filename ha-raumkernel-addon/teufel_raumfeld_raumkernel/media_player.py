@@ -167,16 +167,29 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # Store UPnP class for media_content_type property
         self._upnp_class = now_playing.get("classString", "")
 
-        # Parse duration and position for seek functionality
-        # Add-on provides seconds directly as integer
-        self._attr_media_duration = now_playing.get("durationSeconds", 0)
-        self._attr_media_position = now_playing.get("positionSeconds", 0)
+        # Radio/broadcast streams have no seekable duration. Suppress
+        # duration/position so HA's media-player card never renders the
+        # seekbar for radio stations.
+        _is_broadcast = (
+            "audioBroadcast" in (self._upnp_class or "").lower()
+            or "radio" in (self._upnp_class or "").lower()
+        )
 
-        # Update position timestamp so HA can interpolate position during playback
-        if now_playing.get("isPlaying"):
-            from homeassistant.util import dt as dt_util
+        if _is_broadcast:
+            self._attr_media_duration = None
+            self._attr_media_position = None
+            self._attr_media_position_updated_at = None
+        else:
+            # Parse duration and position for seek functionality
+            # Add-on provides seconds directly as integer
+            self._attr_media_duration = now_playing.get("durationSeconds") or None
+            self._attr_media_position = now_playing.get("positionSeconds") or None
 
-            self._attr_media_position_updated_at = dt_util.utcnow()
+            # Update position timestamp so HA can interpolate position during playback
+            if now_playing.get("isPlaying"):
+                from homeassistant.util import dt as dt_util
+
+                self._attr_media_position_updated_at = dt_util.utcnow()
 
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
@@ -201,8 +214,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.BROWSE_MEDIA
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.TURN_ON
-            | MediaPlayerEntityFeature.SEEK
         )
+
+        # Seek is only meaningful for content with a finite duration (not radio/streams)
+        if not _is_broadcast:
+            features |= MediaPlayerEntityFeature.SEEK
 
         if self._source_switching_supported or self._line_in_supported:
             features |= MediaPlayerEntityFeature.SELECT_SOURCE

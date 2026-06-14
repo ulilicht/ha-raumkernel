@@ -111,7 +111,7 @@ class RaumkernelHelper extends EventEmitter {
             this.raumkernel.settings.raumfeldHost = process.env.RAUMFELD_HOST.trim();
             console.log(`[RK] [INFO] Using configured Raumfeld Host: ${this.raumkernel.settings.raumfeldHost}`);
         }
-        
+
         /** @type {Map<string, RoomInfo>} Room registry keyed by RENDERER UDN */
         this._rooms = new Map();
 
@@ -127,7 +127,7 @@ class RaumkernelHelper extends EventEmitter {
         /** @type {Map<string, number>} Timestamp until which a cached "LineIn" source should not be
          *  overridden by stale URI-based detection (renderer reconnect after Line-in switch) */
         this._roomLineInGraceUntil = new Map();
-        
+
         /** @type {{isReady: boolean, availableRooms: RoomState[], favourites: []}} */
         this._state = {
             isReady: false,
@@ -147,12 +147,12 @@ class RaumkernelHelper extends EventEmitter {
     _setupLogging() {
         const logLevel = process.env.LOG_LEVEL ? parseInt(process.env.LOG_LEVEL) : 2;
         this.raumkernel.createLogger(logLevel);
-        
+
         const logPrefixes = ['ERROR', 'WARN ', 'INFO ', 'VERB ', 'DEBUG', 'SILLY'];
         this.raumkernel.logger.on('log', (data) => {
             // Suppress expected errors during capability detection
             if (data.log.includes('Source Select') && data.log.includes('GetDeviceSetting') && data.logType === 0) {
-                 return;
+                return;
             }
             const prefix = logPrefixes[data.logType] || `LVL${data.logType}`;
             console.log(`[RK] [${prefix}] ${data.log}`);
@@ -166,7 +166,7 @@ class RaumkernelHelper extends EventEmitter {
             if (ready) {
                 // If we have a fixed host, we might want to log it
                 if (this.raumkernel.getSettings().raumfeldHost !== "0.0.0.0") {
-                     console.log(`${LOG_PREFIX.REGISTRY} Connected to fixed host: ${this.raumkernel.getSettings().raumfeldHost}`);
+                    console.log(`${LOG_PREFIX.REGISTRY} Connected to fixed host: ${this.raumkernel.getSettings().raumfeldHost}`);
                 }
                 this._refreshRoomRegistry();
 
@@ -199,8 +199,9 @@ class RaumkernelHelper extends EventEmitter {
         });
 
         this.raumkernel.on('rendererStateKeyValueChanged', (mediaRenderer, key, oldValue, newValue) => {
-            if ((key === 'TransportState' && newValue === 'PLAYING') || 
-                (key === 'CurrentTrackTitle') || 
+            // Trigger position poll on track/state changes for immediate HA updates
+            // Recognised keys: 'TransportState' (playing), 'CurrentTrackMetaData' (new track)
+            if ((key === 'TransportState' && newValue === 'PLAYING') ||
                 (key === 'CurrentTrackMetaData')) {
                 setTimeout(() => {
                     this._pollPositionForRenderer(mediaRenderer);
@@ -242,7 +243,7 @@ class RaumkernelHelper extends EventEmitter {
             if (this._rooms.has(rendererUdn)) continue;
 
             const roomInfo = this._createRoomInfo(rendererUdn, renderer);
-            
+
             // Skip rooms with empty name or roomUdn - this happens when the device
             // is discovered before the zone configuration is available from the host.
             // The room will be added on subsequent updates when metadata is populated.
@@ -251,12 +252,12 @@ class RaumkernelHelper extends EventEmitter {
                     `incomplete metadata (name: "${roomInfo.name}", roomUdn: "${roomInfo.roomUdn}")`);
                 continue;
             }
-            
+
             this._rooms.set(rendererUdn, roomInfo);
-            
+
             console.log(`${LOG_PREFIX.REGISTRY} Added: ${roomInfo.name} ` +
                 `(room: ${roomInfo.roomUdn}, renderer: ${roomInfo.rendererUdn})`);
-            
+
             // Detect capabilities if getting a new room
             this._detectCapabilities(rendererUdn, renderer);
         }
@@ -292,7 +293,7 @@ class RaumkernelHelper extends EventEmitter {
      */
     _handleZoneStateChange(combinedStateData) {
         const state = JSON.parse(JSON.stringify(combinedStateData));
-        
+
         this._refreshRoomRegistry();
         this._updateZoneMappings(state);
         this._broadcastRoomStates();
@@ -316,12 +317,12 @@ class RaumkernelHelper extends EventEmitter {
         for (const zone of combinedState.zones) {
             // Log zone details for debugging
             // console.log(`${LOG_PREFIX.REGISTRY} Processing zone: ${zone.udn} (isZone: ${zone.isZone}, name: ${zone.name})`);
-            
+
             if (!zone.isZone) continue;
 
             const memberUdns = zone.rooms?.map(r => r.udn) ?? [];
             // console.log(`${LOG_PREFIX.REGISTRY} Zone ${zone.name} (${zone.udn}) has members: ${memberUdns.join(', ')}`);
-            
+
             for (const memberUdn of memberUdns) {
                 const room = this._findRoomByAnyUdn(memberUdn);
                 if (room) {
@@ -344,7 +345,7 @@ class RaumkernelHelper extends EventEmitter {
 
         for (const room of this._rooms.values()) {
             const nowPlaying = this._getNowPlayingForRoom(room);
-            
+
             rooms.push({
                 name: room.name,
                 udn: room.roomUdn,
@@ -409,6 +410,13 @@ class RaumkernelHelper extends EventEmitter {
         }
 
         for (const renderer of playingRenderers.values()) {
+            // Re-check TransportState before UPnP call to prevent node-raumkernel
+            // from logging errors if the renderer stopped playing in the meantime.
+            if (renderer.rendererState?.TransportState !== 'PLAYING') continue;
+
+            // Skip position polling for live broadcast streams (radio)
+            if (this._isBroadcastRenderer(renderer)) continue;
+
             renderer.getPositionInfo().then((posInfo) => {
                 if (posInfo && posInfo.RelTime) {
                     renderer.rendererState.RelativeTimePosition = posInfo.RelTime;
@@ -418,7 +426,7 @@ class RaumkernelHelper extends EventEmitter {
                     this._broadcastRoomStates();
                 }
             }).catch(() => {
-                // Ignore errors
+                // Ignore errors (e.g. renderer stopped mid-call)
             });
         }
     }
@@ -427,6 +435,8 @@ class RaumkernelHelper extends EventEmitter {
         if (!mediaRenderer) return;
         try {
             if (mediaRenderer.rendererState?.TransportState !== 'PLAYING') return;
+            // Skip broadcast renderers
+            if (this._isBroadcastRenderer(mediaRenderer)) return;
             const posInfo = await mediaRenderer.getPositionInfo();
             if (posInfo && posInfo.RelTime) {
                 mediaRenderer.rendererState.RelativeTimePosition = posInfo.RelTime;
@@ -436,8 +446,25 @@ class RaumkernelHelper extends EventEmitter {
                 this._broadcastRoomStates();
             }
         } catch {
-            // Ignore errors
+            // Ignore errors (e.g. renderer stopped mid-call)
         }
+    }
+
+    /**
+     * Checks if renderer is playing a live broadcast stream (e.g., radio).
+     * Such streams lack seekable duration, so position polling is skipped.
+     *
+     * @param {*} renderer - A node-raumkernel media renderer instance
+     * @returns {boolean}
+     */
+    _isBroadcastRenderer(renderer) {
+        const meta = renderer?.rendererState?.CurrentTrackMetaData ||
+            renderer?.rendererState?.AVTransportURIMetaData || '';
+        if (!meta) return false;
+        // Use regex to avoid expensive JSDOM parsing in the polling loop
+        const match = meta.match(/<upnp:class[^>]*>([^<]+)<\/upnp:class>/i);
+        const classStr = match ? match[1].toLowerCase() : '';
+        return classStr.includes('audiobroadcast') || classStr.includes('radio');
     }
 
     // ========================================================================
@@ -464,7 +491,7 @@ class RaumkernelHelper extends EventEmitter {
 
         // Try partial name match (only if unambiguous)
         if (identifier.length > 2) {
-            const matches = rooms.filter(r => 
+            const matches = rooms.filter(r =>
                 r.name.toLowerCase().includes(identifier.toLowerCase())
             );
             if (matches.length === 1) return matches[0];
@@ -596,7 +623,7 @@ class RaumkernelHelper extends EventEmitter {
         if (!deviceManager) return this._createEmptyNowPlaying();
 
         // Try zone renderer first, then physical renderer
-        let renderer = room.zoneUdn 
+        let renderer = room.zoneUdn
             ? deviceManager.mediaRenderersVirtual.get(room.zoneUdn)
             : null;
 
@@ -604,7 +631,7 @@ class RaumkernelHelper extends EventEmitter {
             renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
         }
 
-        return renderer 
+        return renderer
             ? this._extractNowPlaying(renderer, room)
             : this._createEmptyNowPlaying();
     }
@@ -663,9 +690,9 @@ class RaumkernelHelper extends EventEmitter {
         if (!canPlayNext || !canPlayPrev) {
             const isContainer = this._isContainerMedia(metadata.classString);
             const hasMultipleTracks = (parseInt(state.NumberOfTracks) || 0) > 1;
-            const isRadio = metadata.classString?.includes('audioBroadcast') || 
-                          metadata.classString?.includes('radio');
-            
+            const isRadio = metadata.classString?.includes('audioBroadcast') ||
+                metadata.classString?.includes('radio');
+
             // Radio stations never fallback to enabling next/prev buttons unless explicitly 
             // reported by the device's current transport actions.
             if (!isRadio && ((isContainer && metadata.track) || hasMultipleTracks)) {
@@ -830,15 +857,15 @@ class RaumkernelHelper extends EventEmitter {
      */
     _getPositionForRoom(room, defaultPosition) {
         if (!room) return defaultPosition;
-        
+
         // If we seeked recently (within 5 seconds), use the seek position
         const seekTime = room._lastSeekTime;
         const seekPos = room._lastSeekPosition;
-        
+
         if (seekTime && typeof seekPos === 'number' && (Date.now() - seekTime) < 5000) {
             return seekPos;
         }
-        
+
         return defaultPosition;
     }
 
@@ -846,8 +873,8 @@ class RaumkernelHelper extends EventEmitter {
         if (!classString) return false;
         // UPnP container classes start with object.container
         // We also include podcast to handle podcast containers, but exclude items like musicTrack
-        return classString.startsWith('object.container') || 
-               /playlist|album|podcastContainer/i.test(classString);
+        return classString.startsWith('object.container') ||
+            /playlist|album|podcastContainer/i.test(classString);
     }
 
     /**
@@ -861,7 +888,7 @@ class RaumkernelHelper extends EventEmitter {
         if (!url) return '';
         // Don't convert local Raumfeld image proxy URLs to HTTPS - device doesn't support TLS
         // These URLs point to the Raumfeld host and redirect to external services
-        if (url.includes('/raumfeldImage') || 
+        if (url.includes('/raumfeldImage') ||
             /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost|127\.)/.test(url)) {
             return url;
         }
@@ -940,7 +967,7 @@ class RaumkernelHelper extends EventEmitter {
                         r._lastSeekTime = Date.now();
                     }
                 }
-                
+
                 // Broadcast updated state immediately
                 this._broadcastRoomStates();
             }
@@ -1007,7 +1034,7 @@ class RaumkernelHelper extends EventEmitter {
             await this._wakeRenderer(renderer);
             return renderer.playSystemSound(soundId);
         } else {
-             console.warn(`${LOG_PREFIX.COMMAND} System sound failed: No physical renderer found for room ${room.name} (${room.roomUdn})`);
+            console.warn(`${LOG_PREFIX.COMMAND} System sound failed: No physical renderer found for room ${room.name} (${room.roomUdn})`);
         }
     }
 
@@ -1052,26 +1079,26 @@ class RaumkernelHelper extends EventEmitter {
             // We must target the physical renderer for standby
             const deviceManager = this._getDeviceManager();
             const renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
-            
+
             if (renderer) {
                 if (renderer.enterManualStandby) {
                     await renderer.enterManualStandby();
                     console.log(`${LOG_PREFIX.COMMAND} Successfully entered standby for ${room.name}`);
-                    
+
                     // Wait a moment for the renderer state to update
                     await this._delay(500);
-                    
+
                     // Broadcast updated state immediately
                     this._broadcastRoomStates();
                 } else {
-                     console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterManualStandby`);
+                    console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterManualStandby`);
                 }
             } else {
-                 console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
+                console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
             }
         } catch (err) {
-             console.error(`${LOG_PREFIX.COMMAND} Failed to enter standby for ${room.name}: ${err.message}`);
-             throw err; // Re-throw so caller knows it failed
+            console.error(`${LOG_PREFIX.COMMAND} Failed to enter standby for ${room.name}: ${err.message}`);
+            throw err; // Re-throw so caller knows it failed
         }
     }
 
@@ -1097,14 +1124,14 @@ class RaumkernelHelper extends EventEmitter {
                     // Broadcast updated state immediately
                     this._broadcastRoomStates();
                 } else {
-                     console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterAutomaticStandby`);
+                    console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterAutomaticStandby`);
                 }
             } else {
-                 console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
+                console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
             }
         } catch (err) {
-             console.error(`${LOG_PREFIX.COMMAND} Failed to enter eco/automatic standby for ${room.name}: ${err.message}`);
-             throw err; // Re-throw so caller knows it failed
+            console.error(`${LOG_PREFIX.COMMAND} Failed to enter eco/automatic standby for ${room.name}: ${err.message}`);
+            throw err; // Re-throw so caller knows it failed
         }
     }
 
@@ -1115,8 +1142,8 @@ class RaumkernelHelper extends EventEmitter {
     async joinGroup(roomIdentifier, zoneIdentifier) {
         const room = this.findRoom(roomIdentifier);
         if (!room) {
-             console.warn(`${LOG_PREFIX.COMMAND} joinGroup: Room not found for identifier ${roomIdentifier}`);
-             return;
+            console.warn(`${LOG_PREFIX.COMMAND} joinGroup: Room not found for identifier ${roomIdentifier}`);
+            return;
         }
 
         const zoneManager = this._getZoneManager();
@@ -1129,7 +1156,7 @@ class RaumkernelHelper extends EventEmitter {
         // Resolve target zone UDN
         let targetZoneUdn = zoneIdentifier;
         const targetRoom = this.findRoom(zoneIdentifier);
-        
+
         // Check if target has a valid zone
         if (targetRoom) {
             if (targetRoom.zoneUdn) {
@@ -1138,11 +1165,11 @@ class RaumkernelHelper extends EventEmitter {
                 // Target room exists but has no zone (likely Spotify mode)
                 // We need to create a zone for the target first
                 console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} has no zone (likely Spotify mode), creating zone first`);
-                
+
                 try {
                     // Create a standalone zone for the target room to force UPnP mode
                     await zoneManager.connectRoomToZone(targetRoom.roomUdn, '', false);
-                    
+
                     // Wait for the zone to be created
                     const maxAttempts = 15;
                     let targetZoneCreated = false;
@@ -1152,7 +1179,7 @@ class RaumkernelHelper extends EventEmitter {
                             console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} now has zone: ${newZoneUdn}`);
                             targetZoneUdn = newZoneUdn;
                             targetZoneCreated = true;
-                            
+
                             // Wait for the Raumfeld host to stabilize after zone creation
                             // Without this delay, immediate join attempts may silently fail
                             // Increased to 4s as 1.5s was sometimes insufficient
@@ -1164,7 +1191,7 @@ class RaumkernelHelper extends EventEmitter {
                             await this._delay(500);
                         }
                     }
-                    
+
                     if (!targetZoneCreated) {
                         console.warn(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} zone creation may not have completed`);
                         // Use room UDN as fallback
@@ -1186,16 +1213,16 @@ class RaumkernelHelper extends EventEmitter {
         if (currentZoneUdn && deviceManager.mediaRenderersVirtual.has(currentZoneUdn)) {
             roomHasVirtualRenderer = true;
         }
-        
+
         if (!roomHasVirtualRenderer) {
             // Room is likely in Spotify Connect mode - transition it to UPnP mode first
             // by creating a standalone zone for it
             console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} has no virtual renderer (likely Spotify mode), transitioning to UPnP mode first`);
-            
+
             try {
                 // Create a standalone zone for this room to force UPnP mode
                 await zoneManager.connectRoomToZone(room.roomUdn, '', false);
-                
+
                 // Wait for the zone and virtual renderer to be created
                 const maxAttempts = 15;
                 let transitioned = false;
@@ -1210,7 +1237,7 @@ class RaumkernelHelper extends EventEmitter {
                         await this._delay(500);
                     }
                 }
-                
+
                 if (!transitioned) {
                     console.warn(`${LOG_PREFIX.COMMAND} Room ${room.name} may not have fully transitioned to UPnP mode, attempting join anyway`);
                 }
@@ -1219,7 +1246,7 @@ class RaumkernelHelper extends EventEmitter {
                 // Continue anyway - the main connectRoomToZone might still work
             }
         }
-        
+
         // Now connect room to the target zone
         try {
             await zoneManager.connectRoomToZone(room.roomUdn, targetZoneUdn);
@@ -1233,8 +1260,8 @@ class RaumkernelHelper extends EventEmitter {
     async leaveGroup(roomIdentifier) {
         const room = this.findRoom(roomIdentifier);
         if (!room) {
-             console.warn(`${LOG_PREFIX.COMMAND} leaveGroup: Room not found for identifier ${roomIdentifier}`);
-             return;
+            console.warn(`${LOG_PREFIX.COMMAND} leaveGroup: Room not found for identifier ${roomIdentifier}`);
+            return;
         }
 
         console.log(`${LOG_PREFIX.COMMAND} Removing ${room.name} (${room.roomUdn}) from zone`);
@@ -1275,12 +1302,12 @@ class RaumkernelHelper extends EventEmitter {
                 this._roomCurrentSourceCache.set(room.rendererUdn, source);
                 this._broadcastRoomStates();
             } catch (err) {
-                 console.error(`${LOG_PREFIX.COMMAND} Failed to set source for ${room.name}: ${err.message}`);
-                 // We don't throw here to avoid crashing the add-on, but we log it.
-                 // This is expected for devices that don't support "Source Select" (e.g. Speakers)
+                console.error(`${LOG_PREFIX.COMMAND} Failed to set source for ${room.name}: ${err.message}`);
+                // We don't throw here to avoid crashing the add-on, but we log it.
+                // This is expected for devices that don't support "Source Select" (e.g. Speakers)
             }
         } else {
-             console.warn(`${LOG_PREFIX.COMMAND} Renderer for ${room.name} has no upnpClient`);
+            console.warn(`${LOG_PREFIX.COMMAND} Renderer for ${room.name} has no upnpClient`);
         }
     }
 
