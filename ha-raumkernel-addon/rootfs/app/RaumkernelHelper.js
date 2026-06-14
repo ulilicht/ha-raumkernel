@@ -669,7 +669,22 @@ class RaumkernelHelper {
      */
     _getCurrentSourceForRoom(room, uri, metadata = {}, physicalUri = '') {
         if (room?.sourceSwitchingSupported) {
-            return this._roomCurrentSourceCache.get(room.rendererUdn) || 'Raumfeld';
+            const sourceSelect = this._roomCurrentSourceCache.get(room.rendererUdn) || 'Raumfeld';
+
+            // "Source Select" only distinguishes physical inputs (LineIn, OpticalIn,
+            // TV_ARC) vs. "Raumfeld" (streaming). When streaming, inspect the URI to
+            // tell Spotify Connect/Radio apart from regular Raumfeld playback.
+            if (sourceSelect === 'Raumfeld') {
+                const lowerUri = uri.toLowerCase();
+                if (lowerUri.includes('spotifyconnect') || lowerUri.startsWith('spotify:')) {
+                    return 'Spotify';
+                }
+                if (lowerUri.includes('tunein')) {
+                    return 'Radio';
+                }
+            }
+
+            return sourceSelect;
         }
 
         const lowerUri = uri.toLowerCase();
