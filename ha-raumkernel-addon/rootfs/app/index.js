@@ -223,16 +223,8 @@ rkHelper.raumkernel.on('combinedZoneStateChanged', () => {
     broadcast({ type: 'zoneStateChanged', payload: zones });
 });
 
-rkHelper.raumkernel.on('rendererStateChanged', () => {
-     // This might be too noisy, but useful for real-time updates
-     // Ideally we map this back to the Zone it belongs to or send generic update
-     // For minimal implementation, rely on periodic or major events, or implement granular updates.
-     // rkHelper.getAvailableZones() is triggered by combinedZoneStateChanged mostly.
-     // But 'rendererStateChanged' is for volume/transport changes.
-     
-     // Trigger a broadcast of the full zone state for simplicity for now
-     const fullState = rkHelper.getState(); 
-     broadcast({ type: 'fullStateUpdate', payload: fullState });
+rkHelper.on('roomStatesUpdated', (state) => {
+     broadcast({ type: 'fullStateUpdate', payload: state });
 });
 
 

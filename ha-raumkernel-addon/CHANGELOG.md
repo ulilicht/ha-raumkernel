@@ -1,3 +1,10 @@
+## 1.2.15
+
+- Fix track position and seek behavior 
+- Fix Mute pressing won't unmute in some cases. 
+- Added source icons for media player Input sensor
+- Show an icon and the source name in the media player when there's no album art (e.g. Line-in, Optical, TV)
+
 ## 1.2.14
 
 - Add `selectSource` support for Soundbars and Sounddecks (TV_ARC, OpticalIn).

@@ -151,19 +151,45 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         self._attr_media_image_url = now_playing.get("image")
         self._attr_media_content_id = now_playing.get("uri")
 
+        # When there's no album art (e.g. Line-in, Optical, TV), show an icon
+        # and the source name instead of a blank media player.
+        current_source = now_playing.get("currentSource", "Raumfeld")
+        source_icon = self._SOURCE_ICONS.get(current_source)
+        if not self._attr_media_image_url and source_icon:
+            self._attr_icon = source_icon
+            if not self._attr_media_title:
+                self._attr_media_title = self._SOURCE_RAW_TO_DISPLAY.get(
+                    current_source, current_source
+                )
+        else:
+            self._attr_icon = "mdi:speaker-multiple"
+
         # Store UPnP class for media_content_type property
         self._upnp_class = now_playing.get("classString", "")
 
-        # Parse duration and position for seek functionality
-        # Add-on provides seconds directly as integer
-        self._attr_media_duration = now_playing.get("durationSeconds", 0)
-        self._attr_media_position = now_playing.get("positionSeconds", 0)
+        # Radio/broadcast streams have no seekable duration. Suppress
+        # duration/position so HA's media-player card never renders the
+        # seekbar for radio stations.
+        _is_broadcast = (
+            "audioBroadcast" in (self._upnp_class or "").lower()
+            or "radio" in (self._upnp_class or "").lower()
+        )
 
-        # Update position timestamp so HA can interpolate position during playback
-        if now_playing.get("isPlaying"):
-            from homeassistant.util import dt as dt_util
+        if _is_broadcast:
+            self._attr_media_duration = None
+            self._attr_media_position = None
+            self._attr_media_position_updated_at = None
+        else:
+            # Parse duration and position for seek functionality
+            # Add-on provides seconds directly as integer
+            self._attr_media_duration = now_playing.get("durationSeconds") or None
+            self._attr_media_position = now_playing.get("positionSeconds") or None
 
-            self._attr_media_position_updated_at = dt_util.utcnow()
+            # Update position timestamp so HA can interpolate position during playback
+            if now_playing.get("isPlaying"):
+                from homeassistant.util import dt as dt_util
+
+                self._attr_media_position_updated_at = dt_util.utcnow()
 
         # Store zone info for extra state attributes
         self._zone_name = room_data.get("zoneName")
@@ -188,8 +214,11 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.BROWSE_MEDIA
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.TURN_ON
-            | MediaPlayerEntityFeature.SEEK
         )
+
+        # Seek is only meaningful for content with a finite duration (not radio/streams)
+        if not _is_broadcast:
+            features |= MediaPlayerEntityFeature.SEEK
 
         if self._source_switching_supported or self._line_in_supported:
             features |= MediaPlayerEntityFeature.SELECT_SOURCE
@@ -255,6 +284,14 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         "TV": "TV_ARC",
     }
     _SOURCE_RAW_TO_DISPLAY = {v: k for k, v in _SOURCE_DISPLAY_TO_RAW.items()}
+
+    # Icons shown in place of album art when no media image is available
+    # (e.g. external inputs without track metadata).
+    _SOURCE_ICONS = {
+        "LineIn": "mdi:audio-input-rca",
+        "OpticalIn": "mdi:toslink",
+        "TV_ARC": "mdi:hdmi-port",
+    }
 
     @property
     def source_list(self) -> list[str] | None:

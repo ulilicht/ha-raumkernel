@@ -50,19 +50,75 @@ export default class IntegrationManager {
     }
 
     /**
+     * Parse a version string into core components and pre-release parts
+     */
+    parseVersion(v) {
+        // Strip build metadata first (anything after '+')
+        const plusIndex = v.indexOf('+');
+        const withoutBuild = plusIndex !== -1 ? v.substring(0, plusIndex) : v;
+        
+        // Split by the first hyphen only
+        const dashIndex = withoutBuild.indexOf('-');
+        const versionPart = dashIndex !== -1 ? withoutBuild.substring(0, dashIndex) : withoutBuild;
+        const prereleasePart = dashIndex !== -1 ? withoutBuild.substring(dashIndex + 1) : '';
+        
+        const core = versionPart.split('.').map(Number);
+        
+        let prerelease = [];
+        if (prereleasePart) {
+            prerelease = prereleasePart.split('.').map(part => {
+                if (/^\d+$/.test(part)) {
+                    return Number(part);
+                }
+                return part;
+            });
+        }
+        
+        return { core, prerelease, hasPrerelease: !!prereleasePart };
+    }
+
+    /**
      * Compare two semantic versions
      * Returns: -1 if a < b, 0 if a == b, 1 if a > b
      */
     compareVersions(a, b) {
-        const partsA = a.split('.').map(Number);
-        const partsB = b.split('.').map(Number);
+        const parsedA = this.parseVersion(a);
+        const parsedB = this.parseVersion(b);
         
-        for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-            const numA = partsA[i] || 0;
-            const numB = partsB[i] || 0;
+        for (let i = 0; i < 3; i++) {
+            const numA = parsedA.core[i] || 0;
+            const numB = parsedB.core[i] || 0;
             if (numA < numB) return -1;
             if (numA > numB) return 1;
         }
+        
+        if (parsedA.hasPrerelease && !parsedB.hasPrerelease) return -1;
+        if (!parsedA.hasPrerelease && parsedB.hasPrerelease) return 1;
+        
+        if (parsedA.hasPrerelease && parsedB.hasPrerelease) {
+            const len = Math.max(parsedA.prerelease.length, parsedB.prerelease.length);
+            for (let i = 0; i < len; i++) {
+                const partA = parsedA.prerelease[i];
+                const partB = parsedB.prerelease[i];
+                
+                if (partA === undefined) return -1;
+                if (partB === undefined) return 1;
+                
+                const isNumA = typeof partA === 'number';
+                const isNumB = typeof partB === 'number';
+                
+                if (isNumA && isNumB) {
+                    if (partA < partB) return -1;
+                    if (partA > partB) return 1;
+                } else if (!isNumA && !isNumB) {
+                    if (partA < partB) return -1;
+                    if (partA > partB) return 1;
+                } else {
+                    return isNumA ? -1 : 1;
+                }
+            }
+        }
+        
         return 0;
     }
 
