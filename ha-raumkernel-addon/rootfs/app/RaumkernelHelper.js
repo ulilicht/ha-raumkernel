@@ -749,6 +749,20 @@ class RaumkernelHelper extends EventEmitter {
             physicalUri
         );
 
+        let volume = parseInt(state.Volume) || 0;
+        let isMuted = state.Mute === 1 || state.Mute === '1' || state.Mute === true;
+        if (room?.roomUdn && state.rooms) {
+            const roomState = state.rooms[room.roomUdn];
+            if (roomState) {
+                if (roomState.Volume !== undefined) {
+                    volume = parseInt(roomState.Volume) || 0;
+                }
+                if (roomState.Mute !== undefined) {
+                    isMuted = roomState.Mute === 1 || roomState.Mute === '1' || roomState.Mute === true;
+                }
+            }
+        }
+
         return {
             artist: metadata.artist,
             track: metadata.track,
@@ -758,8 +772,8 @@ class RaumkernelHelper extends EventEmitter {
             classString: metadata.classString,
             isPlaying,
             isLoading,
-            isMuted: state.Mute === 1 || state.Mute === '1' || state.Mute === true,
-            volume: parseInt(state.Volume) || 0,
+            isMuted,
+            volume,
             canPlayPause,
             canPlayNext,
             canPlayPrev,
@@ -1060,13 +1074,23 @@ class RaumkernelHelper extends EventEmitter {
     async setVolume(roomIdentifier, volume) {
         const room = this.findRoom(roomIdentifier);
         const renderer = this._getRendererForRoom(room);
-        if (renderer) return renderer.setVolume(volume);
+        if (!renderer) return;
+
+        if (room?.roomUdn && room.zoneUdn && typeof renderer.setRoomVolume === 'function') {
+            return renderer.setRoomVolume(room.roomUdn, volume);
+        }
+        return renderer.setVolume(volume);
     }
 
     async setMute(roomIdentifier, mute) {
         const room = this.findRoom(roomIdentifier);
         const renderer = this._getRendererForRoom(room);
-        if (renderer) return renderer.setMute(mute);
+        if (!renderer) return;
+
+        if (room?.roomUdn && room.zoneUdn && typeof renderer.setRoomMute === 'function') {
+            return renderer.setRoomMute(room.roomUdn, mute);
+        }
+        return renderer.setMute(mute);
     }
 
     async enterStandby(roomIdentifier) {

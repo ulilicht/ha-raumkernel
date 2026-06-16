@@ -1,3 +1,7 @@
+## 1.2.16
+
+- Change: Changing the volume of a Raumfeld Device in a group now affects only the selected device and not the whole group.
+
 ## 1.2.15
 
 - Fix track position and seek behavior 
