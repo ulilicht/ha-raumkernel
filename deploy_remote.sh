@@ -57,36 +57,43 @@ fi
 if echo "$ADDON_RSYNC_OUTPUT" | grep -qE '^[<>]f'; then
   echo "   ✓ Add-on files changed"
   
-  echo "🔄 Reloading Add-on..."
+  echo "🔄 Reloading Add-on Store..."
   
-  # Reload supervisor to detect changes
-  ssh $USER@$HOST "ha supervisor reload" 2>/dev/null || true
+  # Reload store to detect changes (including version updates)
+  ssh $USER@$HOST "ha store reload" 2>/dev/null || true
   sleep 2
   
   # Check if addon is already installed
-  if ssh $USER@$HOST "ha addons info $ADDON_SLUG" 2>/dev/null | grep -E "state: (started|stopped)"; then
-    # Addon is installed - rebuild and restart
-    echo "   Rebuilding Add-on..."
-    ssh $USER@$HOST "ha addons rebuild $ADDON_SLUG" 2>/dev/null || true
-    sleep 2
-    
-    echo "   Restarting Add-on..."
-    ssh $USER@$HOST "ha addons restart $ADDON_SLUG"
-    sleep 3
+  if ssh $USER@$HOST "ha apps info $ADDON_SLUG" 2>/dev/null | grep -E "state: (started|stopped)"; then
+    # Check if a version update is available
+    if ssh $USER@$HOST "ha apps info $ADDON_SLUG" 2>/dev/null | grep -q "update_available: true"; then
+      echo "   Updating Add-on to new version..."
+      ssh $USER@$HOST "ha apps update $ADDON_SLUG"
+      sleep 3
+    else
+      # Addon is installed but version hasn't changed - rebuild and restart to apply changes
+      echo "   Rebuilding Add-on..."
+      ssh $USER@$HOST "ha apps rebuild $ADDON_SLUG" 2>/dev/null || true
+      sleep 2
+      
+      echo "   Restarting Add-on..."
+      ssh $USER@$HOST "ha apps restart $ADDON_SLUG"
+      sleep 3
+    fi
   else
     # Addon not installed - install it
     echo "   Installing Add-on for the first time..."
-    ssh $USER@$HOST "ha addons install $ADDON_SLUG"
+    ssh $USER@$HOST "ha apps install $ADDON_SLUG"
     sleep 3
     
     echo "   Starting Add-on..."
-    ssh $USER@$HOST "ha addons start $ADDON_SLUG"
+    ssh $USER@$HOST "ha apps start $ADDON_SLUG"
     sleep 3
   fi
   
   # Verify addon is running
   echo "   Verifying Add-on status..."
-  ssh $USER@$HOST "ha addons info $ADDON_SLUG | grep -E 'state:|version:'"
+  ssh $USER@$HOST "ha apps info $ADDON_SLUG | grep -E 'state:|version:'"
   
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
