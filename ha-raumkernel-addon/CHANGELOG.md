@@ -1,3 +1,8 @@
+## 1.2.17
+
+- Maintenance release: upgrade dependencies 
+- Fix: Addon crashes when sleep time is active (previous fix was not applied due to dependency issue). 
+
 ## 1.2.16
 
 - Change: Changing the volume of a Raumfeld Device in a group now affects only the selected device and not the whole group.

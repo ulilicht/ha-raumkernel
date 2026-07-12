@@ -14,5 +14,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/ulilicht/ha-raumkernel/issues",
   "requirements": [],
-  "version": "1.2.16"
+  "version": "1.2.17"
 }
