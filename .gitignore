@@ -6,3 +6,5 @@ __pycache__/
 *.log
 .prompt/
 node-raumkernel-src/
+thoughts/
+.agents/
