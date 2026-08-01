@@ -575,6 +575,32 @@ class RaumkernelHelper extends EventEmitter {
         const zoneManager = this._getZoneManager();
         if (!deviceManager || !zoneManager) return undefined;
 
+        // If any physical renderer in the room is in Spotify mode, release Spotify session first
+        let stoppedAny = false;
+        for (const [, renderer] of deviceManager.mediaRenderers) {
+            const rendererRoomUdn = renderer.roomUdn?.();
+            const rendererUdn = renderer.udn?.();
+            const isRoomMember = (rendererRoomUdn && rendererRoomUdn === room.roomUdn) || (rendererUdn && rendererUdn === room.rendererUdn);
+
+            if (isRoomMember) {
+                const currentUri = renderer.rendererState?.AVTransportURI;
+                if (currentUri && (currentUri.includes('spotify') || currentUri === 'spotify://playback')) {
+                    console.log(`${LOG_PREFIX.RENDERER} Physical renderer for ${room.name} is in Spotify mode. Stopping Spotify session to allow UPnP zone creation.`);
+                    try {
+                        if (renderer.stop) {
+                            await renderer.stop();
+                            stoppedAny = true;
+                        }
+                    } catch (err) {
+                        console.warn(`${LOG_PREFIX.RENDERER} Failed to stop Spotify session for ${room.name}: ${err.message}`);
+                    }
+                }
+            }
+        }
+        if (stoppedAny) {
+            await this._delay(1000);
+        }
+
         // Force the room into UPnP mode by connecting to a zone
         try {
             await zoneManager.connectRoomToZone(room.roomUdn, '', false);
@@ -582,13 +608,23 @@ class RaumkernelHelper extends EventEmitter {
             console.warn(`${LOG_PREFIX.RENDERER} Zone connect failed for ${room.name}: ${err.message}`);
         }
 
-        // Poll for zone creation
-        const maxAttempts = 15;
+        // Poll for zone creation (extended to 15s to handle slow Raumfeld host responses)
+        const maxAttempts = 30;
         for (let i = 0; i < maxAttempts; i++) {
+            // Check direct zone map
             const zoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
             if (zoneUdn && deviceManager.mediaRenderersVirtual.has(zoneUdn)) {
                 return deviceManager.mediaRenderersVirtual.get(zoneUdn);
             }
+
+            // Search by room/renderer UDN in member lists
+            for (const [, renderer] of deviceManager.mediaRenderersVirtual) {
+                const memberUdns = renderer.getRoomRendererUDNs?.() ?? [];
+                if (memberUdns.includes(room.rendererUdn) || memberUdns.includes(room.roomUdn)) {
+                    return renderer;
+                }
+            }
+
             if (i < maxAttempts - 1) {
                 await this._delay(500);
             }
@@ -597,7 +633,7 @@ class RaumkernelHelper extends EventEmitter {
         // Search by renderer UDN as fallback
         for (const [, renderer] of deviceManager.mediaRenderersVirtual) {
             const memberUdns = renderer.getRoomRendererUDNs?.() ?? [];
-            if (memberUdns.includes(room.rendererUdn)) {
+            if (memberUdns.includes(room.rendererUdn) || memberUdns.includes(room.roomUdn)) {
                 return renderer;
             }
         }
@@ -1383,7 +1419,19 @@ class RaumkernelHelper extends EventEmitter {
 
         if (renderer?.loadUri) {
             await this._wakeRenderer(renderer);
-            return renderer.loadUri(url);
+            const res = await renderer.loadUri(url);
+            try {
+                if (renderer.play) {
+                    await this._delay(500);
+                    await renderer.play();
+                }
+            } catch {
+                try {
+                    await this._delay(1000);
+                    if (renderer.play) await renderer.play();
+                } catch { /* ignore */ }
+            }
+            return res;
         }
 
         console.error(`${LOG_PREFIX.MEDIA} No renderer for URI load: ${room.name}`);
