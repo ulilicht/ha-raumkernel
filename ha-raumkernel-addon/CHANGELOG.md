@@ -1,3 +1,7 @@
+## 1.2.18
+
+- Fix Raumfeld devices sometimes do not switch to a different source if previously in spotify connect mode. (#68) 
+
 ## 1.2.17
 
 - Maintenance release: upgrade dependencies 
