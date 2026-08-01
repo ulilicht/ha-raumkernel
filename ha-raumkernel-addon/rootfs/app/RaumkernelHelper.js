@@ -1033,7 +1033,7 @@ class RaumkernelHelper extends EventEmitter {
         const renderer = this._getRendererForRoom(room);
         if (renderer) {
             // Wake the device from standby if needed
-            await this._wakeRenderer(renderer);
+            await this._wakeRenderer(renderer, room);
             return renderer.play();
         }
     }
@@ -1418,17 +1418,29 @@ class RaumkernelHelper extends EventEmitter {
         }
 
         if (renderer?.loadUri) {
-            await this._wakeRenderer(renderer);
-            const res = await renderer.loadUri(url);
+            await this._wakeRenderer(renderer, room);
+
+            let res;
             try {
-                if (renderer.play) {
+                res = await renderer.loadUri(url);
+            } catch (err) {
+                console.warn(`${LOG_PREFIX.MEDIA} Initial loadUri for ${room.name} failed (${err.message}). Retrying after device wake delay...`);
+                await this._delay(1500);
+                renderer = this._getRendererForRoom(room) || renderer;
+                if (renderer?.loadUri) {
+                    res = await renderer.loadUri(url);
+                }
+            }
+
+            try {
+                if (renderer?.play) {
                     await this._delay(500);
                     await renderer.play();
                 }
             } catch {
                 try {
                     await this._delay(1000);
-                    if (renderer.play) await renderer.play();
+                    if (renderer?.play) await renderer.play();
                 } catch { /* ignore */ }
             }
             return res;
@@ -1448,7 +1460,7 @@ class RaumkernelHelper extends EventEmitter {
         }
 
         if (renderer?.loadContainer) {
-            await this._wakeRenderer(renderer);
+            await this._wakeRenderer(renderer, room);
             console.log(`${LOG_PREFIX.MEDIA} Loading container ${containerId} on ${room.name}`);
             return renderer.loadContainer(containerId);
         }
@@ -1467,7 +1479,7 @@ class RaumkernelHelper extends EventEmitter {
         }
 
         if (renderer?.loadSingle) {
-            await this._wakeRenderer(renderer);
+            await this._wakeRenderer(renderer, room);
             console.log(`${LOG_PREFIX.MEDIA} Loading single ${itemId} on ${room.name}`);
             return renderer.loadSingle(itemId);
         }
@@ -1480,35 +1492,54 @@ class RaumkernelHelper extends EventEmitter {
      * Only wakes devices that are actually in standby
      * @param {*} renderer 
      */
-    async _wakeRenderer(renderer) {
+    /**
+     * Wakes renderer from standby state.
+     * Uses Virtual Renderer leaveStandby(roomUdn, true) via Raumfeld Host so that
+     * hardware power-on pulses are properly sent to sleeping devices.
+     * @param {*} renderer 
+     * @param {RoomState} [room]
+     */
+    async _wakeRenderer(renderer, room = null) {
         if (!renderer) return;
+
+        const deviceManager = this._getDeviceManager();
 
         // Physical renderer
         if (renderer.leaveStandby && !renderer.getRoomRendererUDNs) {
-            // Only wake if in standby
             const powerState = renderer.rendererState?.PowerState;
             if (powerState && powerState.includes('STANDBY')) {
                 try {
                     await renderer.leaveStandby(true);
+                    await this._delay(1500);
                 } catch { /* ignore */ }
             }
             return;
         }
 
-        // Virtual renderer - wake all physical members
+        // Virtual renderer: Check if any physical member renderer is in standby
         const memberUdns = renderer.getRoomRendererUDNs?.() ?? [];
-        const deviceManager = this._getDeviceManager();
+        let anyInStandby = false;
 
         for (const udn of memberUdns) {
             const physicalRenderer = deviceManager?.getMediaRenderer(udn);
-            if (physicalRenderer?.leaveStandby) {
-                // Only wake if in standby
-                const powerState = physicalRenderer.rendererState?.PowerState;
-                if (powerState && powerState.includes('STANDBY')) {
-                    try {
-                        await physicalRenderer.leaveStandby(true);
-                    } catch { /* ignore */ }
+            const powerState = physicalRenderer?.rendererState?.PowerState;
+            if (!powerState || powerState.includes('STANDBY')) {
+                anyInStandby = true;
+                break;
+            }
+        }
+
+        if (anyInStandby) {
+            const targetRoomUdn = room?.roomUdn || memberUdns[0];
+            if (targetRoomUdn && typeof renderer.leaveStandby === 'function') {
+                console.log(`${LOG_PREFIX.RENDERER} Room ${room?.name || targetRoomUdn} member renderer(s) in standby. Waking room via Virtual Renderer...`);
+                try {
+                    await renderer.leaveStandby(targetRoomUdn, true);
+                } catch (err) {
+                    console.warn(`${LOG_PREFIX.RENDERER} Failed to wake room via Virtual Renderer: ${err.message}`);
                 }
+                // Allow hardware DSP and network interface time to boot up
+                await this._delay(1500);
             }
         }
     }
