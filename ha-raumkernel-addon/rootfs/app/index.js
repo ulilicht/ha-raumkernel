@@ -30,6 +30,11 @@ console.error = function(...args) {
     originalError(`[${getTimestamp()}]`, ...args);
 };
 
+process.on('unhandledRejection', (reason) => {
+    const errorMsg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    console.error('Unhandled Promise Rejection caught:', errorMsg);
+});
+
 const runtimeConfig = {
     PORT: 3000,
     RAUMFELD_HOST: process.env.RAUMFELD_HOST || '',

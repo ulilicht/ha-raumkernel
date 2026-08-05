@@ -205,7 +205,11 @@ class RaumkernelHelper extends EventEmitter {
                 // Periodically refresh the "Source Select" value for soundbars/sounddecks
                 // to pick up changes made outside of HA (e.g. TV auto-switching to ARC).
                 if (!this._sourcePollInterval) {
-                    this._sourcePollInterval = setInterval(() => this._pollCurrentSources(), 30000);
+                    this._sourcePollInterval = setInterval(() => {
+                        this._pollCurrentSources().catch((err) => {
+                            console.error(`${LOG_PREFIX.REGISTRY} Error in source poll:`, err?.message || err);
+                        });
+                    }, 30000);
                 }
             }
         });
@@ -229,7 +233,7 @@ class RaumkernelHelper extends EventEmitter {
             if ((key === 'TransportState' && newValue === 'PLAYING') ||
                 (key === 'CurrentTrackMetaData')) {
                 setTimeout(() => {
-                    this._pollPositionForRenderer(mediaRenderer);
+                    this._pollPositionForRenderer(mediaRenderer).catch(() => {});
                 }, 500);
             }
         });
