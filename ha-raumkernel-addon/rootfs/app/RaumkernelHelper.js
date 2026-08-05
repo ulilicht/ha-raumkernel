@@ -148,14 +148,39 @@ class RaumkernelHelper extends EventEmitter {
         const logLevel = process.env.LOG_LEVEL ? parseInt(process.env.LOG_LEVEL) : 2;
         this.raumkernel.createLogger(logLevel);
 
+        const formatLogPayload = (payload) => {
+            if (typeof payload === 'string') {
+                return payload;
+            }
+            if (payload instanceof Error) {
+                return payload.stack || `${payload.name}: ${payload.message}`;
+            }
+            if (typeof payload === 'object' && payload !== null) {
+                try {
+                    return JSON.stringify(payload);
+                } catch {
+                    return String(payload);
+                }
+            }
+            return String(payload ?? '');
+        };
+
         const logPrefixes = ['ERROR', 'WARN ', 'INFO ', 'VERB ', 'DEBUG', 'SILLY'];
         this.raumkernel.logger.on('log', (data) => {
+            const logStr = formatLogPayload(data.log);
+
             // Suppress expected errors during capability detection
-            if (data.log.includes('Source Select') && data.log.includes('GetDeviceSetting') && data.logType === 0) {
+            if (logStr.includes('Source Select') && logStr.includes('GetDeviceSetting') && data.logType === 0) {
                 return;
             }
+
+            let fullMsg = logStr;
+            if (data.metadata) {
+                fullMsg += ` | Meta: ${formatLogPayload(data.metadata)}`;
+            }
+
             const prefix = logPrefixes[data.logType] || `LVL${data.logType}`;
-            console.log(`[RK] [${prefix}] ${data.log}`);
+            console.log(`[RK] [${prefix}] ${fullMsg}`);
         });
     }
 
