@@ -506,7 +506,7 @@ class RaumkernelHelper extends EventEmitter {
      * @returns {RoomState|undefined}
      */
     findRoom(identifier) {
-        if (!identifier) return undefined;
+        if (!identifier || typeof identifier !== 'string') return undefined;
 
         const rooms = this._state.availableRooms;
 
@@ -1082,7 +1082,7 @@ class RaumkernelHelper extends EventEmitter {
             return await renderer.stop();
         } catch (err) {
             // 701 = Transition not available (already stopped)
-            if (err.errorCode === '701' || err.message?.includes('701')) {
+            if (err?.errorCode === '701' || err?.message?.includes('701')) {
                 return;
             }
             // Try pause as fallback
@@ -1127,7 +1127,7 @@ class RaumkernelHelper extends EventEmitter {
                 await renderer.prev();
             } catch (err) {
                 // 701 = Transition not available
-                if (err.errorCode === '701' || err.message?.includes('701')) {
+                if (err?.errorCode === '701' || err?.message?.includes('701')) {
                     console.warn(`${LOG_PREFIX.COMMAND} Prev (701) ignored for ${room?.name}`);
                     return;
                 }
