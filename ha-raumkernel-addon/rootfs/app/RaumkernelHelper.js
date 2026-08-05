@@ -169,9 +169,17 @@ class RaumkernelHelper extends EventEmitter {
         this.raumkernel.logger.on('log', (data) => {
             const logStr = formatLogPayload(data.log);
 
-            // Suppress expected errors during capability detection
-            if (logStr.includes('Source Select') && logStr.includes('GetDeviceSetting') && data.logType === 0) {
-                return;
+            // Suppress or downgrade expected errors
+            if (data.logType === 0) {
+                if (logStr.includes('Source Select') && logStr.includes('GetDeviceSetting')) {
+                    return;
+                }
+                if (logStr.includes('Stop on') && logStr.includes('failed')) {
+                    // Raumfeld renderers return UPnP error 701 when Stop is called in Spotify mode.
+                    // Downgrade to DEBUG log as this error is expected and handled gracefully.
+                    console.log(`[RK] [DEBUG] ${logStr}`);
+                    return;
+                }
             }
 
             let fullMsg = logStr;
@@ -621,7 +629,11 @@ class RaumkernelHelper extends EventEmitter {
                             stoppedAny = true;
                         }
                     } catch (err) {
-                        console.warn(`${LOG_PREFIX.RENDERER} Failed to stop Spotify session for ${room.name}: ${err.message}`);
+                        if (err?.message?.includes('701') || err?.message?.includes('Action Stop is currently not allowed')) {
+                            console.log(`${LOG_PREFIX.RENDERER} Spotify session stop ignored for ${room.name} (Action Stop not allowed in current state)`);
+                        } else {
+                            console.warn(`${LOG_PREFIX.RENDERER} Failed to stop Spotify session for ${room.name}: ${err.message}`);
+                        }
                     }
                 }
             }
