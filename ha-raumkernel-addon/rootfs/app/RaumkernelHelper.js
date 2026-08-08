@@ -639,7 +639,7 @@ class RaumkernelHelper extends EventEmitter {
             }
         }
         if (stoppedAny) {
-            await this._delay(1000);
+            await this._delay(100);
         }
 
         // Force the room into UPnP mode by connecting to a zone
@@ -1453,13 +1453,17 @@ class RaumkernelHelper extends EventEmitter {
         if (!room) return;
 
         let renderer = this._getRendererForRoom(room);
+        let isNewVirtualRenderer = false;
 
         if (!renderer?.loadUri) {
             renderer = await this._ensureVirtualRenderer(room);
+            isNewVirtualRenderer = true;
         }
 
         if (renderer?.loadUri) {
-            await this._wakeRenderer(renderer, room);
+            if (!isNewVirtualRenderer) {
+                await this._wakeRenderer(renderer, room);
+            }
 
             let res;
             try {
@@ -1495,13 +1499,17 @@ class RaumkernelHelper extends EventEmitter {
         if (!room) return;
 
         let renderer = this._getRendererForRoom(room);
+        let isNewVirtualRenderer = false;
 
         if (!renderer?.loadContainer) {
             renderer = await this._ensureVirtualRenderer(room);
+            isNewVirtualRenderer = true;
         }
 
         if (renderer?.loadContainer) {
-            await this._wakeRenderer(renderer, room);
+            if (!isNewVirtualRenderer) {
+                await this._wakeRenderer(renderer, room);
+            }
             console.log(`${LOG_PREFIX.MEDIA} Loading container ${containerId} on ${room.name}`);
             return renderer.loadContainer(containerId);
         }
@@ -1514,13 +1522,17 @@ class RaumkernelHelper extends EventEmitter {
         if (!room) return;
 
         let renderer = this._getRendererForRoom(room);
+        let isNewVirtualRenderer = false;
 
         if (!renderer?.loadSingle) {
             renderer = await this._ensureVirtualRenderer(room);
+            isNewVirtualRenderer = true;
         }
 
         if (renderer?.loadSingle) {
-            await this._wakeRenderer(renderer, room);
+            if (!isNewVirtualRenderer) {
+                await this._wakeRenderer(renderer, room);
+            }
             console.log(`${LOG_PREFIX.MEDIA} Loading single ${itemId} on ${room.name}`);
             return renderer.loadSingle(itemId);
         }
