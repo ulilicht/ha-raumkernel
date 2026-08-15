@@ -1,6 +1,11 @@
 ## 1.2.18
 
-- Fix Raumfeld devices sometimes do not switch to a different source if previously in spotify connect mode. (#68) 
+- Fix: Raumfeld devices sometimes do not switch to a different source if previously in Spotify Connect mode (#68).
+- Fix: Prevent add-on crash when logging non-string error payloads (#69).
+- Fix: Add additional type and power state guards when devices are in standby or power save mode.
+- Fix: Optimize virtual zone creation and wake latency when coming out of standby.
+- Fix: Catch unhandled promise rejections in async timer callbacks.
+- Fix: Downgrade UPnP 701 error logs when stopping active Spotify sessions. 
 
 ## 1.2.17
 
