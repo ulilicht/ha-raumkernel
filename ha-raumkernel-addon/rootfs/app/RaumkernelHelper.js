@@ -460,6 +460,12 @@ class RaumkernelHelper extends EventEmitter {
                     if (posInfo.TrackDuration && posInfo.TrackDuration !== '00:00:00') {
                         renderer.rendererState.CurrentTrackDuration = posInfo.TrackDuration;
                     }
+                    // GetPositionInfo also returns the current track's metadata; keep it
+                    // in sync so title/artist/album/cover update when the track changes
+                    // (not just the progress bar).
+                    if (posInfo.TrackMetaData && posInfo.TrackMetaData !== 'NOT_IMPLEMENTED') {
+                        renderer.rendererState.CurrentTrackMetaData = posInfo.TrackMetaData;
+                    }
                     this._broadcastRoomStates();
                 }
             }).catch(() => {
@@ -479,6 +485,10 @@ class RaumkernelHelper extends EventEmitter {
                 mediaRenderer.rendererState.RelativeTimePosition = posInfo.RelTime;
                 if (posInfo.TrackDuration && posInfo.TrackDuration !== '00:00:00') {
                     mediaRenderer.rendererState.CurrentTrackDuration = posInfo.TrackDuration;
+                }
+                // Keep track metadata (title/artist/album/cover) in sync with the poll.
+                if (posInfo.TrackMetaData && posInfo.TrackMetaData !== 'NOT_IMPLEMENTED') {
+                    mediaRenderer.rendererState.CurrentTrackMetaData = posInfo.TrackMetaData;
                 }
                 this._broadcastRoomStates();
             }
