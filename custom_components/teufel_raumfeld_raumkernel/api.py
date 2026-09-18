@@ -50,6 +50,7 @@ class RaumfeldApiClient:
 
                 # Fetch initial state
                 await self.get_zones()
+                await self.get_state()
 
                 # Listen for messages - this blocks until connection is closed
                 await self._listen()
@@ -138,6 +139,10 @@ class RaumfeldApiClient:
     async def get_zones(self) -> None:
         """Request zones."""
         await self.send_command("getZones", {})
+
+    async def get_state(self) -> None:
+        """Request complete state."""
+        await self.send_command("getState", {})
 
     async def play(self, room_udn: str, stream_url: str | None = None) -> None:
         """Play."""
@@ -235,6 +240,14 @@ class RaumfeldApiClient:
     async def leave_group(self, room_udn: str) -> None:
         """Leave a zone (become standalone)."""
         await self.send_command("leaveGroup", {"roomUdn": room_udn})
+
+    async def set_spotify_mode(self, multiroom: bool) -> None:
+        """Set Spotify multiroom mode."""
+        await self.send_command("setSpotifyMode", {"multiroom": multiroom})
+
+    async def set_spotify_primary_room(self, room: str) -> None:
+        """Set Spotify multiroom primary room."""
+        await self.send_command("setSpotifyPrimaryRoom", {"room": room})
 
     async def select_source(self, room_udn: str, source: str) -> None:
         """Select input source."""

@@ -247,6 +247,13 @@ wss.on('connection', (ws) => {
             const { command, payload } = data;
             
             switch (command) {
+                case 'getState':
+                    ws.send(JSON.stringify({
+                        type: 'fullStateUpdate',
+                        payload: rkHelper.getState()
+                    }));
+                    break;
+
                 case 'getZones':
                     ws.send(JSON.stringify({ type: 'zones', payload: rkHelper.getState().availableRooms }));
                     break;
@@ -375,7 +382,13 @@ wss.on('connection', (ws) => {
                     await rkHelper.leaveGroup(payload.roomUdn);
                     break;
 
+                case 'setSpotifyMode':
+                    await rkHelper.setSpotifyMode(payload.multiroom);
+                    break;
 
+                case 'setSpotifyPrimaryRoom':
+                    await rkHelper.setSpotifyPrimaryRoom(payload.room);
+                    break;
 
                 default:
                     console.warn('Unknown command:', command);

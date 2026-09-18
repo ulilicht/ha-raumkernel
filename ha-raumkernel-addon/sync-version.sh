@@ -27,8 +27,10 @@ fi
 echo "Updated package.json to version $VERSION"
 
 # Regenerate package-lock.json
-echo "Regenerating package-lock.json..."
-npm install --package-lock-only
+if command -v npm &> /dev/null; then
+    echo "Regenerating package-lock.json..."
+    npm install --package-lock-only
+fi
 
 # Update integration manifest.json
 cd ../../../custom_components/teufel_raumfeld_raumkernel

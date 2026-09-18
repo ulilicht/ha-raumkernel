@@ -1,3 +1,10 @@
+## 1.2.19
+
+- Feature: Add Spotify multiroom switch to toggle between multi-room and single-room mode. Add Spotify primary room select entity to choose the active Spotify Connect speaker in multiroom mode (#73).
+
+- Fix: Media info (title, artist, album, cover art) did not update when the track changed during playback, while the progress bar did. The position poll now also applies the track metadata returned by the same `GetPositionInfo` call, so the now-playing details stay in sync with the progress (#72).
+- Thanks to contributors @Simanias and @CVossy
+
 ## 1.2.18
 
 - Fix: Raumfeld devices sometimes do not switch to a different source if previously in Spotify Connect mode (#68).
