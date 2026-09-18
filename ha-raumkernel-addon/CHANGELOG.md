@@ -1,7 +1,3 @@
-## 1.2.19
-
-- Fix: Media info (title, artist, album, cover art) did not update when the track changed during playback, while the progress bar did. The position poll now also applies the track metadata returned by the same `GetPositionInfo` call, so the now-playing details stay in sync with the progress.
-
 ## 1.2.18
 
 - Fix: Raumfeld devices sometimes do not switch to a different source if previously in Spotify Connect mode (#68).
