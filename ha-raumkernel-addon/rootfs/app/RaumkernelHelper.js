@@ -77,6 +77,8 @@ try {
  * @property {boolean} canPlayPrev - Whether previous track is available
  * @property {string} duration - Track duration
  * @property {string} position - Current playback position
+ * @property {boolean} shuffle - Whether shuffle is active
+ * @property {'off'|'one'|'all'} repeat - Current repeat mode
  */
 
 /**
@@ -112,6 +114,16 @@ const LOG_PREFIX = {
     COMMAND: '[Command]',
     MEDIA: '[Media]',
     BROWSE: '[Browse]'
+};
+
+// UPnP AVTransport play modes mapped to shuffle/repeat (Home Assistant semantics).
+// There is no "shuffle + repeat one" mode, so that combination falls back to REPEAT_ONE.
+const PLAY_MODES = {
+    NORMAL: { shuffle: false, repeat: 'off' },
+    SHUFFLE: { shuffle: true, repeat: 'off' },
+    REPEAT_ONE: { shuffle: false, repeat: 'one' },
+    REPEAT_ALL: { shuffle: false, repeat: 'all' },
+    RANDOM: { shuffle: true, repeat: 'all' }
 };
 
 // ============================================================================
@@ -1045,8 +1057,17 @@ class RaumkernelHelper extends EventEmitter {
             position: this._getPositionForRoom(room, state.RelativeTimePosition || 0),
             positionSeconds: this._getPositionForRoom(room, positionSeconds),
             powerState,
-            currentSource
+            currentSource,
+            ...this._parsePlayMode(state.CurrentPlayMode)
         };
+    }
+
+    /**
+     * @param {string} playMode - UPnP CurrentPlayMode
+     * @returns {{shuffle: boolean, repeat: 'off'|'one'|'all'}}
+     */
+    _parsePlayMode(playMode) {
+        return PLAY_MODES[String(playMode || '').toUpperCase()] || PLAY_MODES.NORMAL;
     }
 
     /**
@@ -1290,6 +1311,37 @@ class RaumkernelHelper extends EventEmitter {
                 console.warn(`${LOG_PREFIX.COMMAND} Stop/pause failed for ${room?.name}`);
             }
         }
+    }
+
+    /**
+     * Changes shuffle and/or repeat while keeping the other setting as is.
+     * @param {string} roomIdentifier
+     * @param {{shuffle?: boolean, repeat?: 'off'|'one'|'all'}} changes
+     */
+    async _updatePlayMode(roomIdentifier, changes) {
+        const room = this.findRoom(roomIdentifier);
+        const renderer = this._getRendererForRoom(room);
+        if (!renderer) return;
+
+        const { shuffle, repeat } = {
+            ...this._parsePlayMode(renderer.rendererState?.CurrentPlayMode),
+            ...changes
+        };
+        let mode;
+        if (repeat === 'one') mode = 'REPEAT_ONE';
+        else if (repeat === 'all') mode = shuffle ? 'RANDOM' : 'REPEAT_ALL';
+        else mode = shuffle ? 'SHUFFLE' : 'NORMAL';
+
+        console.log(`${LOG_PREFIX.COMMAND} SetPlayMode ${room?.name}: ${mode}`);
+        return renderer.setPlayMode(mode);
+    }
+
+    async setShuffle(roomIdentifier, shuffle) {
+        return this._updatePlayMode(roomIdentifier, { shuffle: !!shuffle });
+    }
+
+    async setRepeat(roomIdentifier, repeat) {
+        return this._updatePlayMode(roomIdentifier, { repeat });
     }
 
     async next(roomIdentifier) {
