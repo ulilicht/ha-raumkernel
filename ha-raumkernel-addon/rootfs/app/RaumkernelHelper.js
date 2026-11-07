@@ -7,17 +7,17 @@
  * 
  * 1. RENDERER UDN (rendererUdn)
  *    - Physical device hardware identifier
- *    - Example: uuid:846851e1-0ad8-4664-b38a-5656ef1fb4ee
+ *    - Example: uuid:11111111-1111-1111-1111-111111111111
  *    - Used to: Look up MediaRenderer objects, match against getRoomRendererUDNs()
  * 
  * 2. ROOM UDN (roomUdn)  
  *    - Logical room identifier
- *    - Example: uuid:a5f7900f-3d53-47c9-a6f1-3e9440461036
+ *    - Example: uuid:22222222-2222-2222-2222-222222222222
  *    - Used to: Identify entities in Home Assistant, zone management operations
  * 
  * 3. ZONE UDN (zoneUdn)
  *    - Virtual renderer identifier (dynamic, changes with zone composition)
- *    - Example: uuid:d673d7dc-b412-4405-94d8-b811ca3ee775
+ *    - Example: uuid:33333333-3333-3333-3333-333333333333
  *    - Used to: Control grouped playback via MediaRendererVirtual
  * 
  * CRITICAL: These are NOT interchangeable!

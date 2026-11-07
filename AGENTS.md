@@ -1,4 +1,4 @@
-# GEMINI Instructions
+# Agent Instructions
 
 ## Context
 
@@ -52,8 +52,8 @@ This integration uses a **Room-Based Grouping** strategy.
 
 **The Raumfeld system has two distinct types of UDNs:**
 
-1. **Renderer UDN** - The physical speaker hardware identifier (e.g., `uuid:846851e1-0ad8-4664-b38a-5656ef1fb4ee`)
-2. **Room UDN** - The logical room identifier in the zone configuration (e.g., `uuid:12345678-abcd-...`)
+1. **Renderer UDN** - The physical speaker hardware identifier (e.g., `uuid:11111111-1111-1111-1111-111111111111`)
+2. **Room UDN** - The logical room identifier in the zone configuration (e.g., `uuid:22222222-2222-2222-2222-222222222222`)
 
 **These are NOT the same!** The physical renderer object has a `roomUdn()` method that returns the actual Room UDN.
 
