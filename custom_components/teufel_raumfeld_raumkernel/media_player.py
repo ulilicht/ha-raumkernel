@@ -134,14 +134,19 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # PowerState can be: ACTIVE, IDLE, STANDBY, MANUAL_STANDBY, AUTOMATIC_STANDBY
         # Use IDLE instead of OFF to keep the UI expanded and controls visible
         power_state = now_playing.get("powerState", "ACTIVE")
+        self._power_state = power_state
 
-        if "STANDBY" in power_state:
-            self._attr_state = MediaPlayerState.IDLE
+        if power_state == "AUTOMATIC_STANDBY":
+            self._attr_state = MediaPlayerState.STANDBY
+        elif "STANDBY" in power_state:
+            self._attr_state = MediaPlayerState.OFF
         elif now_playing.get("isPlaying") or now_playing.get("isLoading"):
             # Treat TRANSITIONING (isLoading) as PLAYING to avoid UI flicker
             self._attr_state = MediaPlayerState.PLAYING
-        else:
+        elif now_playing.get("track"):
             self._attr_state = MediaPlayerState.PAUSED
+        else:
+            self._attr_state = MediaPlayerState.IDLE
 
         self._attr_volume_level = (now_playing.get("volume", 0) or 0) / 100.0
         self._attr_is_volume_muted = now_playing.get("isMuted", False)
@@ -324,11 +329,21 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
+        power_state = getattr(self, "_power_state", "ACTIVE")
+        if power_state == "AUTOMATIC_STANDBY":
+            power_status = "ECO mode"
+        elif "STANDBY" in power_state:
+            power_status = "Off"
+        else:
+            power_status = "On"
+
         return {
             "room_udn": self._udn,
             "zone_name": self._zone_name,
             "current_zone_udn": self._current_zone_udn,
             "zone_members": self._zone_members,
+            "power_state": power_state,
+            "power_status": power_status,
         }
 
     @property
@@ -410,10 +425,8 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         """Turn on the device (wake from standby)."""
         _LOGGER.info("Waking up %s (%s)", self.name, self._udn)
 
-        # Wake the device by calling play
-        # This will trigger leaveStandby in the add-on
         try:
-            await self._client.play(self._udn)
+            await self._client.leave_standby(self._udn)
         except Exception as err:
             _LOGGER.warning("Failed to wake %s: %s", self.name, err)
 

@@ -158,6 +158,9 @@ class RaumkernelHelper extends EventEmitter {
          *  overridden by stale URI-based detection (renderer reconnect after Line-in switch) */
         this._roomLineInGraceUntil = new Map();
 
+        /** @type {Map<string, number>} Rooms currently waking from standby with timestamp */
+        this._wakingRooms = new Map();
+
         /** @type {{isReady: boolean, availableRooms: RoomState[], favourites: []}} */
         this._state = {
             isReady: false,
@@ -288,6 +291,15 @@ class RaumkernelHelper extends EventEmitter {
                 setTimeout(() => {
                     this._pollPositionForRenderer(mediaRenderer).catch(() => {});
                 }, 500);
+            }
+
+            if (key === 'PowerState' && (newValue === 'ACTIVE' || newValue === 'IDLE')) {
+                const roomUdn = mediaRenderer.roomUdn
+                    ? (typeof mediaRenderer.roomUdn === 'function' ? mediaRenderer.roomUdn() : mediaRenderer.roomUdn)
+                    : null;
+                if (roomUdn) {
+                    this._unmarkRoomWaking(roomUdn);
+                }
             }
         });
     }
@@ -1474,6 +1486,79 @@ class RaumkernelHelper extends EventEmitter {
         }
     }
 
+    _isRoomWaking(roomUdn) {
+        if (!roomUdn || !this._wakingRooms) return false;
+        const wakeTime = this._wakingRooms.get(roomUdn);
+        if (!wakeTime) return false;
+        // Expire after 10 seconds in case callback or state change didn't arrive
+        if (Date.now() - wakeTime > 10000) {
+            this._wakingRooms.delete(roomUdn);
+            return false;
+        }
+        return true;
+    }
+
+    _markRoomWaking(roomUdn) {
+        if (!roomUdn) return;
+        if (!this._wakingRooms) this._wakingRooms = new Map();
+        this._wakingRooms.set(roomUdn, Date.now());
+    }
+
+    _unmarkRoomWaking(roomUdn) {
+        if (!roomUdn || !this._wakingRooms) return;
+        this._wakingRooms.delete(roomUdn);
+    }
+
+    async leaveStandby(roomIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        console.log(`${LOG_PREFIX.COMMAND} Leaving standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+
+        const deviceManager = this._getDeviceManager();
+        const physicalRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+        const powerState = physicalRenderer?.rendererState?.PowerState || 'ACTIVE';
+
+        // If already active or idle, nothing to do
+        if (powerState === 'ACTIVE' || powerState === 'IDLE') {
+            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} is already awake (${powerState})`);
+            return;
+        }
+
+        // Check if wake is already in progress
+        if (this._isRoomWaking(room.roomUdn)) {
+            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} wake already in progress, skipping redundant wake`);
+            return;
+        }
+
+        // If in ECO mode (AUTOMATIC_STANDBY) and part of a currently playing zone:
+        // it wakes up automatically via audio stream, no manual leaveStandby needed
+        const zoneRenderer = this._getRendererForRoom(room);
+        const isZonePlaying = zoneRenderer?.rendererState?.TransportState === 'PLAYING';
+        if (powerState === 'AUTOMATIC_STANDBY' && isZonePlaying) {
+            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} is in ECO mode and zone is already playing; will wake automatically`);
+            return;
+        }
+
+        this._markRoomWaking(room.roomUdn);
+
+        try {
+            if (zoneRenderer && typeof zoneRenderer.leaveStandby === 'function') {
+                console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Virtual Renderer`);
+                await zoneRenderer.leaveStandby(room.roomUdn, true);
+            } else if (physicalRenderer && typeof physicalRenderer.leaveStandby === 'function') {
+                console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Physical Renderer`);
+                await physicalRenderer.leaveStandby(true);
+            }
+            await this._delay(1500);
+            this._broadcastRoomStates();
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.COMMAND} Failed to leave standby for ${room.name}: ${err.message}`);
+        } finally {
+            this._unmarkRoomWaking(room.roomUdn);
+        }
+    }
+
     // ========================================================================
     // GROUPING COMMANDS
     // ========================================================================
@@ -1779,14 +1864,11 @@ class RaumkernelHelper extends EventEmitter {
     }
 
     /**
-     * Wakes up all physical renderers in a virtual renderer
-     * Only wakes devices that are actually in standby
-     * @param {*} renderer 
-     */
-    /**
      * Wakes renderer from standby state.
      * Uses Virtual Renderer leaveStandby(roomUdn, true) via Raumfeld Host so that
      * hardware power-on pulses are properly sent to sleeping devices.
+     * Only manual/deep standby devices need explicit waking. Devices in AUTOMATIC_STANDBY
+     * (ECO mode) wake automatically via the incoming audio stream.
      * @param {*} renderer 
      * @param {RoomState} [room]
      */
@@ -1795,42 +1877,62 @@ class RaumkernelHelper extends EventEmitter {
 
         const deviceManager = this._getDeviceManager();
 
-        // Physical renderer
+        // Physical renderer (standalone)
         if (renderer.leaveStandby && !renderer.getRoomRendererUDNs) {
             const powerState = renderer.rendererState?.PowerState;
-            if (powerState && powerState.includes('STANDBY')) {
+            // Devices in AUTOMATIC_STANDBY (ECO mode) wake automatically via audio stream
+            if (powerState && powerState.includes('STANDBY') && powerState !== 'AUTOMATIC_STANDBY') {
+                const roomUdn = renderer.roomUdn
+                    ? (typeof renderer.roomUdn === 'function' ? renderer.roomUdn() : renderer.roomUdn)
+                    : null;
+                if (this._isRoomWaking(roomUdn)) {
+                    console.log(`${LOG_PREFIX.RENDERER} Renderer wake already in progress; skipping redundant wake`);
+                    return;
+                }
+                this._markRoomWaking(roomUdn);
                 try {
                     await renderer.leaveStandby(true);
                     await this._delay(1500);
                 } catch { /* ignore */ }
+                finally {
+                    this._unmarkRoomWaking(roomUdn);
+                }
             }
             return;
         }
 
-        // Virtual renderer: Check if any physical member renderer is in standby
+        // Virtual renderer: Check each physical member renderer
         const memberUdns = renderer.getRoomRendererUDNs?.() ?? [];
-        let anyInStandby = false;
 
         for (const udn of memberUdns) {
             const physicalRenderer = deviceManager?.getMediaRenderer(udn);
             const powerState = physicalRenderer?.rendererState?.PowerState;
-            if (!powerState || powerState.includes('STANDBY')) {
-                anyInStandby = true;
-                break;
-            }
-        }
 
-        if (anyInStandby) {
-            const targetRoomUdn = room?.roomUdn || memberUdns[0];
-            if (targetRoomUdn && typeof renderer.leaveStandby === 'function') {
-                console.log(`${LOG_PREFIX.RENDERER} Room ${room?.name || targetRoomUdn} member renderer(s) in standby. Waking room via Virtual Renderer...`);
-                try {
-                    await renderer.leaveStandby(targetRoomUdn, true);
-                } catch (err) {
-                    console.warn(`${LOG_PREFIX.RENDERER} Failed to wake room via Virtual Renderer: ${err.message}`);
+            // Only wake devices that are in MANUAL_STANDBY (or non-ECO standby).
+            // Devices in AUTOMATIC_STANDBY (ECO mode) wake automatically via audio stream
+            // when playback starts on the zone. Sending LeaveStandby causes firmware crashes.
+            if (powerState && powerState.includes('STANDBY') && powerState !== 'AUTOMATIC_STANDBY') {
+                const targetRoomUdn = physicalRenderer?.roomUdn
+                    ? (typeof physicalRenderer.roomUdn === 'function' ? physicalRenderer.roomUdn() : physicalRenderer.roomUdn)
+                    : (room?.roomUdn || udn);
+
+                if (this._isRoomWaking(targetRoomUdn)) {
+                    console.log(`${LOG_PREFIX.RENDERER} Room ${targetRoomUdn} wake already in progress; skipping redundant wake`);
+                    continue;
                 }
-                // Allow hardware DSP and network interface time to boot up
-                await this._delay(1500);
+
+                if (targetRoomUdn && typeof renderer.leaveStandby === 'function') {
+                    console.log(`${LOG_PREFIX.RENDERER} Room ${targetRoomUdn} in manual standby (${powerState}). Waking room via Virtual Renderer...`);
+                    this._markRoomWaking(targetRoomUdn);
+                    try {
+                        await renderer.leaveStandby(targetRoomUdn, true);
+                        await this._delay(1500);
+                    } catch (err) {
+                        console.warn(`${LOG_PREFIX.RENDERER} Failed to wake room via Virtual Renderer: ${err.message}`);
+                    } finally {
+                        this._unmarkRoomWaking(targetRoomUdn);
+                    }
+                }
             }
         }
     }

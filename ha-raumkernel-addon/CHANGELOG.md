@@ -1,3 +1,10 @@
+## 1.2.21
+
+- Fix: Prevent room drop-outs and hardware crashes when waking up rooms in ECO mode (AUTOMATIC_STANDBY) (#78).
+- Fix: Use dedicated `leaveStandby` command for `media_player.turn_on` instead of calling `play()`.
+- Feature: Expose `power_state` and `power_status` in media player attributes so automations can differentiate between ECO mode and real standby (#78).
+- Fix: Fix platform unload signature error when reloading the integration (#76).
+
 ## 1.2.20
 
 - Feature: When the add-on updates the integration, a "Restart required" repair now appears under Settings → Repairs, with a submit button that restarts Home Assistant (like HACS does). It replaces the plain "restart required" notification (#74).
