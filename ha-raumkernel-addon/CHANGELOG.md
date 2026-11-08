@@ -2,6 +2,7 @@
 
 - Fix: Prevent room drop-outs and hardware crashes when waking up rooms in ECO mode (AUTOMATIC_STANDBY) (#78).
 - Fix: Use dedicated `leaveStandby` command for `media_player.turn_on` instead of calling `play()`.
+- Fix: Map automatic standby to `MediaPlayerState.OFF` instead of deprecated `MediaPlayerState.STANDBY` to avoid HA Core log warnings and fix UI power toggle.
 - Feature: Expose `power_state` and `power_status` in media player attributes so automations can differentiate between ECO mode and real standby (#78).
 - Fix: Fix platform unload signature error when reloading the integration (#76).
 

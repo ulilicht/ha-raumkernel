@@ -130,15 +130,15 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         now_playing = room_data.get("nowPlaying", {})
 
-        # Check power state first - if in standby, show as idle
+        # Check power state first
         # PowerState can be: ACTIVE, IDLE, STANDBY, MANUAL_STANDBY, AUTOMATIC_STANDBY
-        # Use IDLE instead of OFF to keep the UI expanded and controls visible
+        # Note: MediaPlayerState.STANDBY is deprecated in HA Core and will be removed in HA Core 2026.8.0.
+        # Both AUTOMATIC_STANDBY and MANUAL_STANDBY map to MediaPlayerState.OFF so the HA UI shows
+        # the power toggle correctly and no deprecation warnings are logged.
         power_state = now_playing.get("powerState", "ACTIVE")
         self._power_state = power_state
 
-        if power_state == "AUTOMATIC_STANDBY":
-            self._attr_state = MediaPlayerState.STANDBY
-        elif "STANDBY" in power_state:
+        if "STANDBY" in power_state:
             self._attr_state = MediaPlayerState.OFF
         elif now_playing.get("isPlaying") or now_playing.get("isLoading"):
             # Treat TRANSITIONING (isLoading) as PLAYING to avoid UI flicker
