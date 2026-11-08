@@ -132,9 +132,9 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         # Check power state first
         # PowerState can be: ACTIVE, IDLE, STANDBY, MANUAL_STANDBY, AUTOMATIC_STANDBY
-        # Note: MediaPlayerState.STANDBY is deprecated in HA Core and will be removed in HA Core 2026.8.0.
-        # Both AUTOMATIC_STANDBY and MANUAL_STANDBY map to MediaPlayerState.OFF so the HA UI shows
-        # the power toggle correctly and no deprecation warnings are logged.
+        # Note: MediaPlayerState.STANDBY is deprecated in HA Core (removed in 2026.8).
+        # Both AUTOMATIC_STANDBY and MANUAL_STANDBY map to MediaPlayerState.OFF so
+        # the HA UI shows the power toggle correctly without deprecation warnings.
         power_state = now_playing.get("powerState", "ACTIVE")
         self._power_state = power_state
 
