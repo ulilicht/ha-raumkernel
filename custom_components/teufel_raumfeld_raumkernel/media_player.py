@@ -130,15 +130,15 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
 
         now_playing = room_data.get("nowPlaying", {})
 
-        # Check power state first
-        # PowerState can be: ACTIVE, IDLE, STANDBY, MANUAL_STANDBY, AUTOMATIC_STANDBY
-        # Note: MediaPlayerState.STANDBY is deprecated in HA Core (removed in 2026.8).
-        # Both AUTOMATIC_STANDBY and MANUAL_STANDBY map to MediaPlayerState.OFF so
-        # the HA UI shows the power toggle correctly without deprecation warnings.
+        # Check power state:
+        # MANUAL_STANDBY: Device was explicitly turned off -> MediaPlayerState.OFF.
+        # AUTOMATIC_STANDBY: Device is in ECO mode (sleeping after inactivity).
+        # We treat ECO mode as PAUSED/IDLE so track metadata and cover art remain
+        # visible in the UI (matching the Teufel app) without HA deprecation warnings.
         power_state = now_playing.get("powerState", "ACTIVE")
         self._power_state = power_state
 
-        if "STANDBY" in power_state:
+        if power_state != "AUTOMATIC_STANDBY" and "STANDBY" in power_state:
             self._attr_state = MediaPlayerState.OFF
         elif now_playing.get("isPlaying") or now_playing.get("isLoading"):
             # Treat TRANSITIONING (isLoading) as PLAYING to avoid UI flicker
