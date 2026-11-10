@@ -1,10 +1,10 @@
 ## 1.2.21
 
-- Fix: Prevent room drop-outs and hardware crashes when waking up rooms in ECO mode (AUTOMATIC_STANDBY) (#78).
-- Fix: Use dedicated `leaveStandby` command for `media_player.turn_on` instead of calling `play()`.
-- Improvement: Treat automatic standby (ECO mode) as paused/idle to preserve cover art and track metadata (matching Teufel app), while manual standby maps to `MediaPlayerState.OFF`.
-- Feature: Expose `power_state` and `power_status` in media player attributes so automations can differentiate between ECO mode and real standby (#78).
-- Fix: Fix platform unload signature error when reloading the integration (#76).
+- **Feature**: Added `power_state` and `power_status` attributes to media player entities, allowing automations to distinguish between On, ECO mode, and Off (#78).
+- **Improvement**: Speakers in automatic ECO mode now keep their cover art, station/track info, and play button visible. Manually turning off a speaker still shows it as "Off".
+- **Fix**: Prevent network drop-outs and speaker crashes when starting playback while devices are in ECO mode (#78).
+- **Fix**: Turning on a speaker in Home Assistant now wakes it from standby without unintentionally starting playback.
+- **Fix**: Reloading the integration from Home Assistant Settings (Devices & Services) now succeeds without errors (#76).
 
 ## 1.2.20
 
