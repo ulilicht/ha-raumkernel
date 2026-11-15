@@ -158,7 +158,7 @@ class RaumkernelHelper extends EventEmitter {
          *  overridden by stale URI-based detection (renderer reconnect after Line-in switch) */
         this._roomLineInGraceUntil = new Map();
 
-        /** @type {Map<string, number>} Rooms currently waking from standby with timestamp */
+        /** @type {Map<string, { promise: Promise<void>, timestamp: number }>} Rooms currently waking from standby */
         this._wakingRooms = new Map();
 
         /** @type {{isReady: boolean, availableRooms: RoomState[], favourites: []}} */
@@ -291,15 +291,6 @@ class RaumkernelHelper extends EventEmitter {
                 setTimeout(() => {
                     this._pollPositionForRenderer(mediaRenderer).catch(() => {});
                 }, 500);
-            }
-
-            if (key === 'PowerState' && (newValue === 'ACTIVE' || newValue === 'IDLE')) {
-                const roomUdn = mediaRenderer.roomUdn
-                    ? (typeof mediaRenderer.roomUdn === 'function' ? mediaRenderer.roomUdn() : mediaRenderer.roomUdn)
-                    : null;
-                if (roomUdn) {
-                    this._unmarkRoomWaking(roomUdn);
-                }
             }
         });
     }
@@ -705,6 +696,9 @@ class RaumkernelHelper extends EventEmitter {
      * @returns {boolean}
      */
     _isBroadcastRenderer(renderer) {
+        const uri = (renderer?.rendererState?.AVTransportURI || '').toLowerCase();
+        if (uri.includes('tunein')) return true;
+
         const meta = renderer?.rendererState?.CurrentTrackMetaData ||
             renderer?.rendererState?.AVTransportURIMetaData || '';
         if (!meta) return false;
@@ -957,8 +951,22 @@ class RaumkernelHelper extends EventEmitter {
             state.CurrentTrackMetaData || state.AVTransportURIMetaData
         );
 
-        const isLoading = state.TransportState === 'TRANSITIONING';
-        const isPlaying = state.TransportState === 'PLAYING';
+        // PowerState must come from the PHYSICAL renderer, falling back to zone room state
+        // Zone renderers don't have accurate top-level PowerState for individual devices
+        let powerState = 'ACTIVE';
+        if (room) {
+            const deviceManager = this._getDeviceManager();
+            const physicalRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
+            const zoneRoomState = state.rooms?.[room.roomUdn];
+            powerState = physicalRenderer?.rendererState?.PowerState || zoneRoomState?.PowerState || 'ACTIVE';
+        } else {
+            // Fallback if no room info provided
+            powerState = state.PowerState || 'ACTIVE';
+        }
+
+        const isInStandby = Boolean(powerState && powerState.includes('STANDBY'));
+        const isLoading = !isInStandby && state.TransportState === 'TRANSITIONING';
+        const isPlaying = !isInStandby && state.TransportState === 'PLAYING';
 
         // Parse transport actions
         let canPlayPause = false;
@@ -977,8 +985,9 @@ class RaumkernelHelper extends EventEmitter {
         if (!canPlayNext || !canPlayPrev) {
             const isContainer = this._isContainerMedia(metadata.classString);
             const hasMultipleTracks = (parseInt(state.NumberOfTracks) || 0) > 1;
-            const isRadio = metadata.classString?.includes('audioBroadcast') ||
-                metadata.classString?.includes('radio');
+            const lowerClass = (metadata.classString || '').toLowerCase();
+            const isRadio = lowerClass.includes('audiobroadcast') ||
+                lowerClass.includes('radio');
 
             // Radio stations never fallback to enabling next/prev buttons unless explicitly 
             // reported by the device's current transport actions.
@@ -986,18 +995,6 @@ class RaumkernelHelper extends EventEmitter {
                 canPlayNext = true;
                 canPlayPrev = true;
             }
-        }
-
-        // PowerState must come from the PHYSICAL renderer, not the zone renderer
-        // Zone renderers don't have accurate PowerState for individual devices
-        let powerState = 'ACTIVE';
-        if (room) {
-            const deviceManager = this._getDeviceManager();
-            const physicalRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
-            powerState = physicalRenderer?.rendererState?.PowerState || 'ACTIVE';
-        } else {
-            // Fallback if no room info provided
-            powerState = state.PowerState || 'ACTIVE';
         }
 
         // Parse time strings to seconds (helper)
@@ -1301,7 +1298,44 @@ class RaumkernelHelper extends EventEmitter {
     async pause(roomIdentifier) {
         const room = this.findRoom(roomIdentifier);
         const renderer = this._getRendererForRoom(room);
-        if (renderer) return renderer.pause();
+        if (!renderer) return;
+
+        const actions = renderer.rendererState?.CurrentTransportActions ?? '';
+        const pauseUnsupported =
+            this._isBroadcastRenderer(renderer) ||
+            (actions && !/Pause/i.test(actions) && /Stop/i.test(actions));
+
+        if (pauseUnsupported) {
+            try {
+                return await renderer.stop();
+            } catch (err) {
+                if (err?.errorCode === '701' || err?.message?.includes('701')) {
+                    return;
+                }
+                console.warn(`${LOG_PREFIX.COMMAND} Stop fallback for pause failed on ${room?.name}: ${err.message}`);
+                return;
+            }
+        }
+
+        try {
+            return await renderer.pause();
+        } catch (err) {
+            // 701 = Transition not available (e.g. live stream that only supports Stop, or already paused/stopped)
+            if (err?.errorCode === '701' || err?.message?.includes('701')) {
+                const transportState = renderer.rendererState?.TransportState;
+                if (transportState === 'PLAYING' || transportState === 'TRANSITIONING') {
+                    try {
+                        return await renderer.stop();
+                    } catch { /* ignore */ }
+                }
+                return;
+            }
+            try {
+                return await renderer.stop();
+            } catch {
+                console.warn(`${LOG_PREFIX.COMMAND} Pause/stop failed for ${room?.name}`);
+            }
+        }
     }
 
     async stop(roomIdentifier) {
@@ -1420,88 +1454,106 @@ class RaumkernelHelper extends EventEmitter {
         return renderer.setMute(mute);
     }
 
-    async enterStandby(roomIdentifier) {
-        const room = this.findRoom(roomIdentifier);
+    async _stopZoneIfLastActiveRoom(room) {
         if (!room) return;
 
-        console.log(`${LOG_PREFIX.COMMAND} Entering standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+        const otherActiveRoomsInZone = room.zoneUdn
+            ? this._state.availableRooms.filter(
+                (r) =>
+                    r.zoneUdn === room.zoneUdn &&
+                    r.roomUdn !== room.roomUdn &&
+                    !r.nowPlaying?.powerState?.includes('STANDBY')
+            )
+            : [];
 
-        try {
-            // We must target the physical renderer for standby
-            const deviceManager = this._getDeviceManager();
-            const renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
-
-            if (renderer) {
-                if (renderer.enterManualStandby) {
-                    await renderer.enterManualStandby();
-                    console.log(`${LOG_PREFIX.COMMAND} Successfully entered standby for ${room.name}`);
-
-                    // Wait a moment for the renderer state to update
-                    await this._delay(500);
-
-                    // Broadcast updated state immediately
-                    this._broadcastRoomStates();
-                } else {
-                    console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterManualStandby`);
+        if (otherActiveRoomsInZone.length === 0) {
+            const zoneRenderer = this._getRendererForRoom(room);
+            const transportState = zoneRenderer?.rendererState?.TransportState;
+            if (transportState === 'PLAYING' || transportState === 'TRANSITIONING') {
+                try {
+                    await this.pause(room.roomUdn);
+                } catch (err) {
+                    console.warn(`${LOG_PREFIX.COMMAND} Failed to pause/stop ${room.name} before standby: ${err.message}`);
                 }
-            } else {
-                console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
             }
-        } catch (err) {
-            console.error(`${LOG_PREFIX.COMMAND} Failed to enter standby for ${room.name}: ${err.message}`);
-            throw err; // Re-throw so caller knows it failed
         }
+    }
+
+    async enterStandby(roomIdentifier) {
+        return this._enterStandbyMode(roomIdentifier, 'enterManualStandby', 'standby');
     }
 
     async enterEcoStandby(roomIdentifier) {
+        return this._enterStandbyMode(roomIdentifier, 'enterAutomaticStandby', 'eco/automatic standby');
+    }
+
+    /**
+     * Transitions a room into manual or automatic standby, stopping zone playback
+     * first if no other active room remains in the zone.
+     */
+    async _enterStandbyMode(roomIdentifier, methodName, label) {
         const room = this.findRoom(roomIdentifier);
         if (!room) return;
 
-        console.log(`${LOG_PREFIX.COMMAND} Entering eco/automatic standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+        console.log(`${LOG_PREFIX.COMMAND} Entering ${label} for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
 
         try {
+            // Stop/pause zone playback if this is the only/last active room in the zone
+            await this._stopZoneIfLastActiveRoom(room);
+
             // We must target the physical renderer for standby
             const deviceManager = this._getDeviceManager();
             const renderer = deviceManager.mediaRenderers.get(room.rendererUdn);
 
-            if (renderer) {
-                if (renderer.enterAutomaticStandby) {
-                    await renderer.enterAutomaticStandby();
-                    console.log(`${LOG_PREFIX.COMMAND} Successfully entered eco/automatic standby for ${room.name}`);
-
-                    // Wait a moment for the renderer state to update
-                    await this._delay(500);
-
-                    // Broadcast updated state immediately
-                    this._broadcastRoomStates();
-                } else {
-                    console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support enterAutomaticStandby`);
-                }
-            } else {
+            if (!renderer) {
                 console.warn(`${LOG_PREFIX.COMMAND} Renderer not found for ${room.name}. Available renderers: ${Array.from(deviceManager.mediaRenderers.keys()).join(', ')}`);
+                return;
             }
+            if (typeof renderer[methodName] !== 'function') {
+                console.warn(`${LOG_PREFIX.COMMAND} Renderer ${room.name} does not support ${methodName}`);
+                return;
+            }
+
+            await renderer[methodName]();
+            console.log(`${LOG_PREFIX.COMMAND} Successfully entered ${label} for ${room.name}`);
+
+            await this._delay(500);
+            this._broadcastRoomStates();
         } catch (err) {
-            console.error(`${LOG_PREFIX.COMMAND} Failed to enter eco/automatic standby for ${room.name}: ${err.message}`);
-            throw err; // Re-throw so caller knows it failed
+            console.error(`${LOG_PREFIX.COMMAND} Failed to enter ${label} for ${room.name}: ${err.message}`);
+            throw err;
         }
     }
 
-    _isRoomWaking(roomUdn) {
-        if (!roomUdn || !this._wakingRooms) return false;
-        const wakeTime = this._wakingRooms.get(roomUdn);
-        if (!wakeTime) return false;
+    _getWakingEntry(roomUdn) {
+        if (!roomUdn || !this._wakingRooms) return null;
+        const entry = this._wakingRooms.get(roomUdn);
+        if (!entry) return null;
         // Expire after 10 seconds in case callback or state change didn't arrive
-        if (Date.now() - wakeTime > 10000) {
+        if (Date.now() - entry.timestamp > 10000) {
             this._wakingRooms.delete(roomUdn);
-            return false;
+            return null;
         }
-        return true;
+        return entry;
     }
 
-    _markRoomWaking(roomUdn) {
+    _isRendererAwake(renderer) {
+        const current = renderer?.rendererState?.PowerState;
+        return current === 'ACTIVE' || current === 'IDLE';
+    }
+
+    async _waitForRendererAwake(renderer, timeoutMs = 3000) {
+        const deadline = Date.now() + timeoutMs;
+        while (!this._isRendererAwake(renderer) && Date.now() < deadline) {
+            await this._delay(200);
+        }
+        return this._isRendererAwake(renderer);
+    }
+
+    _markRoomWaking(roomUdn, promise = null) {
         if (!roomUdn) return;
         if (!this._wakingRooms) this._wakingRooms = new Map();
-        this._wakingRooms.set(roomUdn, Date.now());
+        this._wakingRooms.set(roomUdn, { promise, timestamp: Date.now() });
     }
 
     _unmarkRoomWaking(roomUdn) {
@@ -1509,15 +1561,50 @@ class RaumkernelHelper extends EventEmitter {
         this._wakingRooms.delete(roomUdn);
     }
 
-    async leaveStandby(roomIdentifier) {
-        const room = this.findRoom(roomIdentifier);
+    /**
+     * If a wake is currently in progress for roomUdn, awaits its completion
+     * without sending a duplicate LeaveStandby command.
+     * @param {string} roomUdn
+     * @returns {Promise<boolean>} true if an in-flight wake was awaited
+     */
+    async _awaitInFlightWake(roomUdn) {
+        const entry = this._getWakingEntry(roomUdn);
+        if (!entry) return false;
+        console.log(`${LOG_PREFIX.COMMAND} Room ${roomUdn} wake already in progress; waiting for completion without sending redundant wake`);
+        if (entry.promise) {
+            try {
+                await entry.promise;
+            } catch { /* ignore */ }
+        }
+        return true;
+    }
+
+    /**
+     * Wakes a single room from standby.
+     * Sends LeaveStandby via the Virtual Renderer (without the 8s room-state trigger wait
+     * that fails when rooms are pruned in manual standby) and falls back to the Physical
+     * Renderer if the room has not transitioned to ACTIVE/IDLE within 1s (e.g. when the
+     * zone host itself is in manual standby).
+     *
+     * @param {RoomState|RoomInfo} room
+     * @param {{ skipEcoStandby?: boolean }} [options]
+     */
+    async _wakeRoom(room, options = {}) {
         if (!room) return;
 
-        console.log(`${LOG_PREFIX.COMMAND} Leaving standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+        // If a wake is already in flight for this room, await it so callers like
+        // loadSingle/play don't fire before the device finishes waking, while never
+        // sending a duplicate LeaveStandby command (#78).
+        if (await this._awaitInFlightWake(room.roomUdn)) {
+            return;
+        }
 
         const deviceManager = this._getDeviceManager();
         const physicalRenderer = deviceManager?.mediaRenderers.get(room.rendererUdn);
-        const powerState = physicalRenderer?.rendererState?.PowerState || 'ACTIVE';
+        const zoneRenderer = this._getRendererForRoom(room);
+        const isVirtualRenderer = Boolean(zoneRenderer && typeof zoneRenderer.getRoomRendererUDNs === 'function');
+        const zoneRoomState = isVirtualRenderer ? zoneRenderer.rendererState?.rooms?.[room.roomUdn] : null;
+        const powerState = physicalRenderer?.rendererState?.PowerState || zoneRoomState?.PowerState || 'ACTIVE';
 
         // If already active or idle, nothing to do
         if (powerState === 'ACTIVE' || powerState === 'IDLE') {
@@ -1525,38 +1612,67 @@ class RaumkernelHelper extends EventEmitter {
             return;
         }
 
-        // Check if wake is already in progress
-        if (this._isRoomWaking(room.roomUdn)) {
-            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} wake already in progress, skipping redundant wake`);
+        // When starting playback, devices in AUTOMATIC_STANDBY (ECO mode) wake automatically
+        // via the incoming audio stream; sending LeaveStandby causes firmware crashes (#78).
+        if (powerState === 'AUTOMATIC_STANDBY' && options.skipEcoStandby) {
             return;
         }
 
-        // If in ECO mode (AUTOMATIC_STANDBY) and part of a currently playing zone:
+        // If in ECO mode (AUTOMATIC_STANDBY) and part of a currently playing/transitioning zone:
         // it wakes up automatically via audio stream, no manual leaveStandby needed
-        const zoneRenderer = this._getRendererForRoom(room);
-        const isZonePlaying = zoneRenderer?.rendererState?.TransportState === 'PLAYING';
+        const transportState = zoneRenderer?.rendererState?.TransportState;
+        const isZonePlaying = transportState === 'PLAYING' || transportState === 'TRANSITIONING';
         if (powerState === 'AUTOMATIC_STANDBY' && isZonePlaying) {
             console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} is in ECO mode and zone is already playing; will wake automatically`);
             return;
         }
 
-        this._markRoomWaking(room.roomUdn);
+        const wakePromise = (async () => {
+            try {
+                if (isVirtualRenderer && typeof zoneRenderer.leaveStandby === 'function') {
+                    console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Virtual Renderer`);
+                    try {
+                        await zoneRenderer.leaveStandby(room.roomUdn, false);
+                    } catch (err) {
+                        console.warn(`${LOG_PREFIX.COMMAND} Virtual Renderer leaveStandby failed for ${room.name}: ${err.message}`);
+                    }
 
-        try {
-            if (zoneRenderer && typeof zoneRenderer.leaveStandby === 'function') {
-                console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Virtual Renderer`);
-                await zoneRenderer.leaveStandby(room.roomUdn, true);
-            } else if (physicalRenderer && typeof physicalRenderer.leaveStandby === 'function') {
-                console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Physical Renderer`);
-                await physicalRenderer.leaveStandby(true);
+                    // Wait up to 1s to see if the virtual renderer wake succeeded
+                    await this._waitForRendererAwake(physicalRenderer, 1000);
+                }
+
+                if (!this._isRendererAwake(physicalRenderer) && physicalRenderer && typeof physicalRenderer.leaveStandby === 'function') {
+                    console.log(`${LOG_PREFIX.COMMAND} Waking ${room.name} via Physical Renderer`);
+                    try {
+                        await physicalRenderer.leaveStandby(false);
+                    } catch (err) {
+                        console.warn(`${LOG_PREFIX.COMMAND} Physical Renderer leaveStandby failed for ${room.name}: ${err.message}`);
+                    }
+                }
+
+                // Wait up to 3s for the physical renderer's PowerState to transition to ACTIVE or IDLE
+                await this._waitForRendererAwake(physicalRenderer, 3000);
+
+                // Allow hardware DSP and network interface time to boot up
+                await this._delay(1000);
+                this._broadcastRoomStates();
+            } catch (err) {
+                console.warn(`${LOG_PREFIX.COMMAND} Failed to leave standby for ${room.name}: ${err.message}`);
+            } finally {
+                this._unmarkRoomWaking(room.roomUdn);
             }
-            await this._delay(1500);
-            this._broadcastRoomStates();
-        } catch (err) {
-            console.warn(`${LOG_PREFIX.COMMAND} Failed to leave standby for ${room.name}: ${err.message}`);
-        } finally {
-            this._unmarkRoomWaking(room.roomUdn);
-        }
+        })();
+
+        this._markRoomWaking(room.roomUdn, wakePromise);
+        await wakePromise;
+    }
+
+    async leaveStandby(roomIdentifier) {
+        const room = this.findRoom(roomIdentifier);
+        if (!room) return;
+
+        console.log(`${LOG_PREFIX.COMMAND} Leaving standby for ${room.name} (Room UDN: ${room.roomUdn}, Renderer UDN: ${room.rendererUdn})`);
+        await this._wakeRoom(room, { skipEcoStandby: false });
     }
 
     // ========================================================================
@@ -1586,99 +1702,101 @@ class RaumkernelHelper extends EventEmitter {
             if (targetRoom.zoneUdn) {
                 targetZoneUdn = targetRoom.zoneUdn;
             } else {
-                // Target room exists but has no zone (likely Spotify mode)
-                // We need to create a zone for the target first
-                console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} has no zone (likely Spotify mode), creating zone first`);
-
-                try {
-                    // Create a standalone zone for the target room to force UPnP mode
-                    await zoneManager.connectRoomToZone(targetRoom.roomUdn, '', false);
-
-                    // Wait for the zone to be created
-                    const maxAttempts = 15;
-                    let targetZoneCreated = false;
-                    for (let i = 0; i < maxAttempts; i++) {
-                        const newZoneUdn = zoneManager.getZoneUDNFromRoomUDN(targetRoom.roomUdn);
-                        if (newZoneUdn && deviceManager.mediaRenderersVirtual.has(newZoneUdn)) {
-                            console.log(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} now has zone: ${newZoneUdn}`);
-                            targetZoneUdn = newZoneUdn;
-                            targetZoneCreated = true;
-
-                            // Wait for the Raumfeld host to stabilize after zone creation
-                            // Without this delay, immediate join attempts may silently fail
-                            // Increased to 4s as 1.5s was sometimes insufficient
-                            console.log(`${LOG_PREFIX.COMMAND} Waiting for zone to stabilize...`);
-                            await this._delay(4000);
-                            break;
-                        }
-                        if (i < maxAttempts - 1) {
-                            await this._delay(500);
-                        }
-                    }
-
-                    if (!targetZoneCreated) {
-                        console.warn(`${LOG_PREFIX.COMMAND} Target room ${targetRoom.name} zone creation may not have completed`);
-                        // Use room UDN as fallback
-                        targetZoneUdn = targetRoom.roomUdn;
-                    }
-                } catch (err) {
-                    console.warn(`${LOG_PREFIX.COMMAND} Failed to create zone for target ${targetRoom.name}: ${err.message}`);
-                    targetZoneUdn = targetRoom.roomUdn;
-                }
+                // Target room exists but has no zone (likely Spotify mode) — create one
+                // and allow 4s stabilization so immediate join attempts don't silently fail.
+                const createdZoneUdn = await this._transitionRoomToUpnpZone(
+                    targetRoom,
+                    zoneManager,
+                    deviceManager,
+                    4000
+                );
+                targetZoneUdn = createdZoneUdn || targetRoom.roomUdn;
             }
         }
 
         console.log(`${LOG_PREFIX.COMMAND} Joining ${room.name} (${room.roomUdn}) to zone ${targetZoneUdn}`);
 
-        // Check if the room being joined currently has a virtual renderer (i.e., is in UPnP mode)
-        // If not, the room is likely in Spotify Connect mode and needs to be transitioned first
-        let roomHasVirtualRenderer = false;
-        const currentZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
-        if (currentZoneUdn && deviceManager.mediaRenderersVirtual.has(currentZoneUdn)) {
-            roomHasVirtualRenderer = true;
-        }
+        // Wait for any in-flight wake or wake from manual standby so the speaker's DSP
+        // is ready before the host moves it into a playing zone. Skip ECO standby (#78).
+        await this._wakeRoom(room, { skipEcoStandby: true });
 
-        if (!roomHasVirtualRenderer) {
-            // Room is likely in Spotify Connect mode - transition it to UPnP mode first
-            // by creating a standalone zone for it
-            console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} has no virtual renderer (likely Spotify mode), transitioning to UPnP mode first`);
-
-            try {
-                // Create a standalone zone for this room to force UPnP mode
-                await zoneManager.connectRoomToZone(room.roomUdn, '', false);
-
-                // Wait for the zone and virtual renderer to be created
-                const maxAttempts = 15;
-                let transitioned = false;
-                for (let i = 0; i < maxAttempts; i++) {
-                    const newZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
-                    if (newZoneUdn && deviceManager.mediaRenderersVirtual.has(newZoneUdn)) {
-                        console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} successfully transitioned to UPnP mode (zone: ${newZoneUdn})`);
-                        transitioned = true;
-                        break;
-                    }
-                    if (i < maxAttempts - 1) {
-                        await this._delay(500);
-                    }
-                }
-
-                if (!transitioned) {
-                    console.warn(`${LOG_PREFIX.COMMAND} Room ${room.name} may not have fully transitioned to UPnP mode, attempting join anyway`);
-                }
-            } catch (err) {
-                console.warn(`${LOG_PREFIX.COMMAND} Failed to create standalone zone for ${room.name}: ${err.message}`);
-                // Continue anyway - the main connectRoomToZone might still work
-            }
-        }
-
-        // Now connect room to the target zone
+        // Attempt direct join first: works for already-UPnP rooms and unassigned standby rooms
+        // without creating a temporary standalone zone that races with the actual zone join.
         try {
             await zoneManager.connectRoomToZone(room.roomUdn, targetZoneUdn);
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.COMMAND} Initial connectRoomToZone failed for ${room.name}: ${err.message}`);
+        }
+
+        if (await this._waitForRoomInZone(zoneManager, room.roomUdn, targetZoneUdn, 3000)) {
             console.log(`${LOG_PREFIX.COMMAND} Successfully joined ${room.name} to zone ${targetZoneUdn}`);
+            return;
+        }
+
+        // If direct join did not place the room into targetZoneUdn, check if it lacks a
+        // virtual renderer (e.g., Spotify Connect mode) and transition it to UPnP first.
+        const currentZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+        if (!currentZoneUdn || !deviceManager.mediaRenderersVirtual.has(currentZoneUdn)) {
+            await this._transitionRoomToUpnpZone(room, zoneManager, deviceManager);
+        } else {
+            await this._delay(1500);
+        }
+
+        try {
+            await zoneManager.connectRoomToZone(room.roomUdn, targetZoneUdn);
         } catch (err) {
             console.error(`${LOG_PREFIX.COMMAND} joinGroup failed: ${err.message}`);
             throw err;
         }
+
+        if (await this._waitForRoomInZone(zoneManager, room.roomUdn, targetZoneUdn, 4000)) {
+            console.log(`${LOG_PREFIX.COMMAND} Successfully joined ${room.name} to zone ${targetZoneUdn}`);
+        } else {
+            console.warn(`${LOG_PREFIX.COMMAND} Room ${room.name} did not appear in zone ${targetZoneUdn} within timeout`);
+        }
+    }
+
+    /**
+     * Polls until a room is mapped to the expected zone UDN.
+     */
+    async _waitForRoomInZone(zoneManager, roomUdn, targetZoneUdn, timeoutMs = 3000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (zoneManager.getZoneUDNFromRoomUDN(roomUdn) === targetZoneUdn) {
+                return true;
+            }
+            await this._delay(250);
+        }
+        return zoneManager.getZoneUDNFromRoomUDN(roomUdn) === targetZoneUdn;
+    }
+
+    /**
+     * Creates a standalone UPnP zone for a room (e.g., to exit Spotify Connect mode)
+     * and waits for the Raumfeld host to stabilize before subsequent zone commands.
+     * @returns {Promise<string|null>} Created zone UDN, or null if not confirmed
+     */
+    async _transitionRoomToUpnpZone(room, zoneManager, deviceManager, stabilizeMs = 3000) {
+        console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} has no virtual renderer (likely Spotify mode), transitioning to UPnP mode first`);
+        try {
+            await zoneManager.connectRoomToZone(room.roomUdn, '', false);
+
+            const maxAttempts = 15;
+            for (let i = 0; i < maxAttempts; i++) {
+                const newZoneUdn = zoneManager.getZoneUDNFromRoomUDN(room.roomUdn);
+                if (newZoneUdn && deviceManager.mediaRenderersVirtual.has(newZoneUdn)) {
+                    console.log(`${LOG_PREFIX.COMMAND} Room ${room.name} transitioned to UPnP mode (zone: ${newZoneUdn}), stabilizing...`);
+                    await this._delay(stabilizeMs);
+                    return newZoneUdn;
+                }
+                if (i < maxAttempts - 1) {
+                    await this._delay(500);
+                }
+            }
+            console.warn(`${LOG_PREFIX.COMMAND} Room ${room.name} may not have fully transitioned to UPnP mode`);
+        } catch (err) {
+            console.warn(`${LOG_PREFIX.COMMAND} Failed to create standalone zone for ${room.name}: ${err.message}`);
+        }
+        return null;
     }
 
     async leaveGroup(roomIdentifier) {
@@ -1864,20 +1982,23 @@ class RaumkernelHelper extends EventEmitter {
     }
 
     /**
-     * Wakes renderer from standby state.
-     * Uses Virtual Renderer leaveStandby(roomUdn, true) via Raumfeld Host so that
-     * hardware power-on pulses are properly sent to sleeping devices.
-     * Only manual/deep standby devices need explicit waking. Devices in AUTOMATIC_STANDBY
-     * (ECO mode) wake automatically via the incoming audio stream.
+     * Wakes renderer from standby state before starting playback.
+     * When targeting a specific room, only wakes that room from manual standby
+     * (never waking other zone members that were explicitly turned off into manual standby).
+     * Devices in AUTOMATIC_STANDBY (ECO mode) wake automatically via the incoming audio stream.
      * @param {*} renderer 
      * @param {RoomState} [room]
      */
     async _wakeRenderer(renderer, room = null) {
         if (!renderer) return;
 
-        const deviceManager = this._getDeviceManager();
+        // When a target room is known, wake only that room if it is in manual standby
+        if (room) {
+            await this._wakeRoom(room, { skipEcoStandby: true });
+            return;
+        }
 
-        // Physical renderer (standalone)
+        // Fallback when no room is passed (e.g. playSystemSound on physical renderer)
         if (renderer.leaveStandby && !renderer.getRoomRendererUDNs) {
             const powerState = renderer.rendererState?.PowerState;
             // Devices in AUTOMATIC_STANDBY (ECO mode) wake automatically via audio stream
@@ -1885,54 +2006,21 @@ class RaumkernelHelper extends EventEmitter {
                 const roomUdn = renderer.roomUdn
                     ? (typeof renderer.roomUdn === 'function' ? renderer.roomUdn() : renderer.roomUdn)
                     : null;
-                if (this._isRoomWaking(roomUdn)) {
-                    console.log(`${LOG_PREFIX.RENDERER} Renderer wake already in progress; skipping redundant wake`);
+                if (await this._awaitInFlightWake(roomUdn)) {
                     return;
                 }
-                this._markRoomWaking(roomUdn);
-                try {
-                    await renderer.leaveStandby(true);
-                    await this._delay(1500);
-                } catch { /* ignore */ }
-                finally {
-                    this._unmarkRoomWaking(roomUdn);
-                }
-            }
-            return;
-        }
-
-        // Virtual renderer: Check each physical member renderer
-        const memberUdns = renderer.getRoomRendererUDNs?.() ?? [];
-
-        for (const udn of memberUdns) {
-            const physicalRenderer = deviceManager?.getMediaRenderer(udn);
-            const powerState = physicalRenderer?.rendererState?.PowerState;
-
-            // Only wake devices that are in MANUAL_STANDBY (or non-ECO standby).
-            // Devices in AUTOMATIC_STANDBY (ECO mode) wake automatically via audio stream
-            // when playback starts on the zone. Sending LeaveStandby causes firmware crashes.
-            if (powerState && powerState.includes('STANDBY') && powerState !== 'AUTOMATIC_STANDBY') {
-                const targetRoomUdn = physicalRenderer?.roomUdn
-                    ? (typeof physicalRenderer.roomUdn === 'function' ? physicalRenderer.roomUdn() : physicalRenderer.roomUdn)
-                    : (room?.roomUdn || udn);
-
-                if (this._isRoomWaking(targetRoomUdn)) {
-                    console.log(`${LOG_PREFIX.RENDERER} Room ${targetRoomUdn} wake already in progress; skipping redundant wake`);
-                    continue;
-                }
-
-                if (targetRoomUdn && typeof renderer.leaveStandby === 'function') {
-                    console.log(`${LOG_PREFIX.RENDERER} Room ${targetRoomUdn} in manual standby (${powerState}). Waking room via Virtual Renderer...`);
-                    this._markRoomWaking(targetRoomUdn);
+                const wakePromise = (async () => {
                     try {
-                        await renderer.leaveStandby(targetRoomUdn, true);
-                        await this._delay(1500);
-                    } catch (err) {
-                        console.warn(`${LOG_PREFIX.RENDERER} Failed to wake room via Virtual Renderer: ${err.message}`);
-                    } finally {
-                        this._unmarkRoomWaking(targetRoomUdn);
+                        await renderer.leaveStandby(false);
+                        await this._waitForRendererAwake(renderer, 3000);
+                        await this._delay(1000);
+                    } catch { /* ignore */ }
+                    finally {
+                        this._unmarkRoomWaking(roomUdn);
                     }
-                }
+                })();
+                this._markRoomWaking(roomUdn, wakePromise);
+                await wakePromise;
             }
         }
     }

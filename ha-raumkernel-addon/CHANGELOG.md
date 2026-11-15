@@ -1,3 +1,10 @@
+## 1.2.22
+
+- **Fix**: Turning on or starting playback on a single speaker that was previously switched off while grouped now wakes only that speaker, without waking other turned-off speakers in the same group (#82).
+- **Fix**: Adding a switched-off speaker to an already playing group now wakes the speaker and starts playing along on the first try.
+- **Fix**: Pausing or turning off live radio streams (such as TuneIn) now stops playback cleanly (#81).
+- **Fix**: Speakers that are turned off or sleeping in ECO mode no longer briefly appear as "Playing" in Home Assistant before they wake up (#81).
+
 ## 1.2.21
 
 - **Feature**: Added `power_state` and `power_status` attributes to media player entities, allowing automations to distinguish between On, ECO mode, and Off (#78).
