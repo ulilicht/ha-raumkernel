@@ -138,7 +138,13 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         power_state = now_playing.get("powerState", "ACTIVE")
         self._power_state = power_state
 
-        if power_state != "AUTOMATIC_STANDBY" and "STANDBY" in power_state:
+        if power_state == "AUTOMATIC_STANDBY":
+            self._attr_state = (
+                MediaPlayerState.PAUSED
+                if now_playing.get("track")
+                else MediaPlayerState.IDLE
+            )
+        elif "STANDBY" in power_state:
             self._attr_state = MediaPlayerState.OFF
         elif now_playing.get("isPlaying") or now_playing.get("isLoading"):
             # Treat TRANSITIONING (isLoading) as PLAYING to avoid UI flicker
@@ -177,8 +183,9 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         # duration/position so HA's media-player card never renders the
         # seekbar for radio stations.
         _is_broadcast = (
-            "audioBroadcast" in (self._upnp_class or "").lower()
+            "audiobroadcast" in (self._upnp_class or "").lower()
             or "radio" in (self._upnp_class or "").lower()
+            or current_source == "Radio"
         )
 
         if _is_broadcast:
@@ -409,11 +416,16 @@ class RaumfeldMediaPlayer(MediaPlayerEntity):
         """Turn off the device."""
         _LOGGER.info("Turning off %s (%s)", self.name, self._udn)
 
-        # First pause playback if playing
-        try:
-            await self.async_media_pause()
-        except Exception as err:
-            _LOGGER.warning("Failed to pause %s before turn off: %s", self.name, err)
+        # First pause/stop playback if standalone (multi-room zone stop is handled
+        # by the add-on only when no other active room remains in the zone).
+        is_standalone = len(self._zone_members) <= 1
+        if is_standalone and self._attr_state == MediaPlayerState.PLAYING:
+            try:
+                await self.async_media_pause()
+            except Exception as err:
+                _LOGGER.warning(
+                    "Failed to pause %s before turn off: %s", self.name, err
+                )
 
         # Then attempt standby
         try:
